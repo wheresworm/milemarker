@@ -120,3 +120,4 @@ app.*.symbols
 # Ignore Android Studio / IntelliJ files
 .idea/
 *.iml
+.env
