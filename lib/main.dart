@@ -58,8 +58,10 @@ void main() async {
   final routeService = RouteService(
     directionsService: directionsService,
     placesService: placesService,
+    databaseService: databaseService,
     foodStopService: foodStopService,
     fuelPlanningService: fuelPlanningService,
+    optimizationService: optimizationService,
   );
 
   runApp(
@@ -68,7 +70,10 @@ void main() async {
         ChangeNotifierProvider(create: (_) => ThemeController()),
         ChangeNotifierProvider(create: (_) => PlacesController(placesService)),
         ChangeNotifierProvider(
-            create: (_) => RouteController(routeService, databaseService)),
+            create: (_) => RouteController(
+                  routeService,
+                  databaseService,
+                )),
       ],
       child: const MileMarkerApp(),
     ),
