@@ -1,116 +1,92 @@
-import '../utils/location_point.dart';
+import 'user_route.dart';
 
 class Trip {
-  final int? id;
-  final String? title;
-  final String? category;
+  final String id;
+  final String routeId;
+  final UserRoute? route;
   final DateTime startTime;
   final DateTime? endTime;
-  final double distance;
-  final Duration duration;
-  final List<LocationPoint> route;
-  final double averageSpeed;
-  final double maxSpeed;
-  final double totalElevationGain;
-  final String? notes;
-  final List<String>? photos;
-  final Map<String, dynamic>? metadata;
+  final TripStatus status;
+  final double? distance; // actual miles driven
+  final Duration? duration; // actual time taken
+  final double? averageSpeed;
+  final double? maxSpeed;
+  final Map<String, dynamic>? analytics;
 
   Trip({
-    this.id,
-    this.title,
-    this.category,
+    String? id,
+    required this.routeId,
+    this.route,
     required this.startTime,
     this.endTime,
-    required this.distance,
-    required this.duration,
-    required this.route,
-    required this.averageSpeed,
-    required this.maxSpeed,
-    this.totalElevationGain = 0.0,
-    this.notes,
-    this.photos,
-    this.metadata,
-  });
+    required this.status,
+    this.distance,
+    this.duration,
+    this.averageSpeed,
+    this.maxSpeed,
+    this.analytics,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
-  // Create a trip from database map
-  factory Trip.fromMap(Map<String, dynamic> map) {
-    return Trip(
-      id: map['id'],
-      title: map['title'],
-      category: map['category'],
-      startTime: DateTime.fromMillisecondsSinceEpoch(map['start_time']),
-      endTime:
-          map['end_time'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(map['end_time'])
-              : null,
-      distance: map['distance'],
-      duration: Duration(seconds: map['duration']),
-      route:
-          (map['route'] as List<dynamic>)
-              .map((point) => LocationPoint.fromMap(point))
-              .toList(),
-      averageSpeed: map['average_speed'],
-      maxSpeed: map['max_speed'],
-      totalElevationGain: map['total_elevation_gain'] ?? 0.0,
-      notes: map['notes'],
-      photos: map['photos'] != null ? List<String>.from(map['photos']) : null,
-      metadata: map['metadata'],
-    );
-  }
-
-  // Convert trip to database map
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id,
-      'title': title,
-      'category': category,
-      'start_time': startTime.millisecondsSinceEpoch,
-      'end_time': endTime?.millisecondsSinceEpoch,
-      'distance': distance,
-      'duration': duration.inSeconds,
-      'route': route.map((point) => point.toMap()).toList(),
-      'average_speed': averageSpeed,
-      'max_speed': maxSpeed,
-      'total_elevation_gain': totalElevationGain,
-      'notes': notes,
-      'photos': photos,
-      'metadata': metadata,
-    };
-  }
-
-  // Create a copy with updated fields
   Trip copyWith({
-    int? id,
-    String? title,
-    String? category,
+    String? id,
+    String? routeId,
+    UserRoute? route,
     DateTime? startTime,
     DateTime? endTime,
+    TripStatus? status,
     double? distance,
     Duration? duration,
-    List<LocationPoint>? route,
     double? averageSpeed,
     double? maxSpeed,
-    double? totalElevationGain,
-    String? notes,
-    List<String>? photos,
-    Map<String, dynamic>? metadata,
+    Map<String, dynamic>? analytics,
   }) {
     return Trip(
       id: id ?? this.id,
-      title: title ?? this.title,
-      category: category ?? this.category,
+      routeId: routeId ?? this.routeId,
+      route: route ?? this.route,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
+      status: status ?? this.status,
       distance: distance ?? this.distance,
       duration: duration ?? this.duration,
-      route: route ?? this.route,
       averageSpeed: averageSpeed ?? this.averageSpeed,
       maxSpeed: maxSpeed ?? this.maxSpeed,
-      totalElevationGain: totalElevationGain ?? this.totalElevationGain,
-      notes: notes ?? this.notes,
-      photos: photos ?? this.photos,
-      metadata: metadata ?? this.metadata,
+      analytics: analytics ?? this.analytics,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'routeId': routeId,
+        'route': route?.toJson(),
+        'startTime': startTime.toIso8601String(),
+        'endTime': endTime?.toIso8601String(),
+        'status': status.toString().split('.').last,
+        'distance': distance,
+        'duration': duration?.inMinutes,
+        'averageSpeed': averageSpeed,
+        'maxSpeed': maxSpeed,
+        'analytics': analytics,
+      };
+
+  factory Trip.fromJson(Map<String, dynamic> json) {
+    return Trip(
+      id: json['id'],
+      routeId: json['routeId'],
+      route: json['route'] != null ? UserRoute.fromJson(json['route']) : null,
+      startTime: DateTime.parse(json['startTime']),
+      endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
+      status: TripStatus.values.firstWhere(
+        (s) => s.toString().split('.').last == json['status'],
+      ),
+      distance: json['distance']?.toDouble(),
+      duration:
+          json['duration'] != null ? Duration(minutes: json['duration']) : null,
+      averageSpeed: json['averageSpeed']?.toDouble(),
+      maxSpeed: json['maxSpeed']?.toDouble(),
+      analytics: json['analytics'],
     );
   }
 }
+
+enum TripStatus { planning, active, paused, completed, cancelled }

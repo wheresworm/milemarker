@@ -1,74 +1,78 @@
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'time_window.dart';
 
-enum StopType { place, food, fuel, rest, scenic, custom }
-
-enum MealType { breakfast, lunch, dinner, snack }
-
-enum FuelBrand {
-  shell,
-  chevron,
-  exxon,
-  bp,
-  mobil,
-  speedway,
-  wawa,
-  sheetz,
-  costco,
-  sams,
-  any
-}
-
-abstract class Stop {
+class Stop {
   final String id;
-  final LatLng location;
   final String name;
-  final StopType type;
+  final LatLng location;
   final int order;
-  final Duration? estimatedDuration;
+  final Duration estimatedDuration;
   final TimeWindow? timeWindow;
   final String? notes;
+  final StopType type;
 
   Stop({
-    required this.id,
-    required this.location,
+    String? id,
     required this.name,
-    required this.type,
+    required this.location,
     required this.order,
-    this.estimatedDuration,
+    this.estimatedDuration = const Duration(minutes: 30),
     this.timeWindow,
     this.notes,
-  });
-
-  Map<String, dynamic> toMap();
+    this.type = StopType.custom,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
   Stop copyWith({
+    String? id,
+    String? name,
+    LatLng? location,
     int? order,
     Duration? estimatedDuration,
     TimeWindow? timeWindow,
     String? notes,
-  });
-}
+    StopType? type,
+  }) {
+    return Stop(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      location: location ?? this.location,
+      order: order ?? this.order,
+      estimatedDuration: estimatedDuration ?? this.estimatedDuration,
+      timeWindow: timeWindow ?? this.timeWindow,
+      notes: notes ?? this.notes,
+      type: type ?? this.type,
+    );
+  }
 
-class TimeWindow {
-  final DateTime earliest;
-  final DateTime latest;
-  final DateTime preferred;
-
-  TimeWindow({
-    required this.earliest,
-    required this.latest,
-    required this.preferred,
-  });
-
-  Map<String, dynamic> toMap() => {
-        'earliest': earliest.toIso8601String(),
-        'latest': latest.toIso8601String(),
-        'preferred': preferred.toIso8601String(),
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'order': order,
+        'estimatedDuration': estimatedDuration.inMinutes,
+        'timeWindow': timeWindow?.toJson(),
+        'notes': notes,
+        'type': type.toString().split('.').last,
       };
 
-  factory TimeWindow.fromMap(Map<String, dynamic> map) => TimeWindow(
-        earliest: DateTime.parse(map['earliest']),
-        latest: DateTime.parse(map['latest']),
-        preferred: DateTime.parse(map['preferred']),
-      );
+  factory Stop.fromJson(Map<String, dynamic> json) {
+    return Stop(
+      id: json['id'],
+      name: json['name'],
+      location: LatLng(json['latitude'], json['longitude']),
+      order: json['order'],
+      estimatedDuration: Duration(minutes: json['estimatedDuration'] ?? 30),
+      timeWindow: json['timeWindow'] != null
+          ? TimeWindow.fromJson(json['timeWindow'])
+          : null,
+      notes: json['notes'],
+      type: StopType.values.firstWhere(
+        (t) => t.toString().split('.').last == json['type'],
+        orElse: () => StopType.custom,
+      ),
+    );
+  }
 }
+
+enum StopType { origin, destination, meal, fuel, rest, hotel, scenic, custom }

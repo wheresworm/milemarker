@@ -13,19 +13,28 @@ class FoodStop extends Stop {
   final String? placeId;
 
   FoodStop({
-    super.id,
-    required super.name,
-    required super.location,
-    required super.order,
-    super.estimatedDuration = const Duration(minutes: 45),
-    super.timeWindow,
-    super.notes,
+    String? id,
+    required String name,
+    required LatLng location,
+    required int order,
+    Duration estimatedDuration = const Duration(minutes: 45),
+    TimeWindow? timeWindow,
+    String? notes,
     required this.mealType,
     this.cuisineType,
     this.rating,
     this.priceLevel,
     required this.placeId,
-  });
+  }) : super(
+          id: id,
+          name: name,
+          location: location,
+          order: order,
+          estimatedDuration: estimatedDuration,
+          timeWindow: timeWindow,
+          notes: notes,
+          type: StopType.meal,
+        );
 
   @override
   Map<String, dynamic> toJson() {
