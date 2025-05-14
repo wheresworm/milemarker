@@ -56,6 +56,8 @@ class Stop {
         'type': type.toString().split('.').last,
       };
 
+  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+
   factory Stop.fromJson(Map<String, dynamic> json) {
     return Stop(
       id: json['id'],

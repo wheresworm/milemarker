@@ -1,5 +1,3 @@
-import 'package:flutter/material.dart';
-
 class TimeWindow {
   final DateTime? earliest;
   final TimeRange? preferred;

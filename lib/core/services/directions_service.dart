@@ -90,12 +90,12 @@ class Directions {
 
     final legs = json['legs'] as List;
     double totalDistanceMeters = 0;
-    int totalDurationSeconds = 0;
+    double totalDurationSeconds = 0;
     List<DirectionStep> allSteps = [];
 
     for (final leg in legs) {
-      totalDistanceMeters += leg['distance']['value'];
-      totalDurationSeconds += leg['duration']['value'];
+      totalDistanceMeters += (leg['distance']['value'] as num).toDouble();
+      totalDurationSeconds += (leg['duration']['value'] as num).toDouble();
 
       final steps = leg['steps'] as List;
       allSteps.addAll(steps.map((s) => DirectionStep.fromJson(s)));
@@ -104,7 +104,7 @@ class Directions {
     return Directions(
       polylinePoints: polylinePoints,
       totalDistance: totalDistanceMeters / 1609.344, // Convert to miles
-      totalDuration: Duration(seconds: totalDurationSeconds),
+      totalDuration: Duration(seconds: totalDurationSeconds.toInt()),
       summary: json['summary'],
       steps: allSteps,
     );
