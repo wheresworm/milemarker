@@ -1,469 +1,240 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:provider/provider.dart';
-import '../../data/providers/location_provider.dart';
-import '../../data/providers/route_provider.dart';
-import '../../core/utils/logger.dart';
-import '../widgets/location_input.dart';
-import '../widgets/map_with_route.dart';
-import '../widgets/bottom_sheet_content.dart';
-import 'trip_summary_screen.dart';
+import '../../core/models/trip.dart';
+import '../../core/services/location_service.dart';
+import '../../core/utils/constants.dart';
+import '../../core/utils/formatters.dart';
+import '../widgets/animated_tracking_button.dart';
+import '../widgets/trip_bottom_sheet.dart';
+import '../widgets/speed_display_overlay.dart';
 
 class MapScreen extends StatefulWidget {
-  const MapScreen({super.key});
+  final bool isTracking;
+  final Trip? currentTrip;
+  final LatLng? currentLocation;
+  final VoidCallback onToggleTracking;
+  final VoidCallback onPlanRoute;
+  final AnimationController fabAnimationController;
+  final AnimationController bottomSheetController;
+
+  const MapScreen({
+    super.key,
+    required this.isTracking,
+    required this.currentTrip,
+    required this.currentLocation,
+    required this.onToggleTracking,
+    required this.onPlanRoute,
+    required this.fabAnimationController,
+    required this.bottomSheetController,
+  });
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   GoogleMapController? _mapController;
-  final double _bottomSheetMinHeight = 0.2;
-  final double _bottomSheetMaxHeight = 0.8;
-  double _bottomSheetHeight = 0.2;
-  bool _showAdvancedSettings = false;
-  final TextEditingController _mpgController = TextEditingController(
-    text: '25',
-  );
-  final TextEditingController _tankRangeController = TextEditingController(
-    text: '350',
-  );
+  Set<Polyline> _polylines = {};
+  Set<Marker> _markers = {};
+
+  final LatLng _defaultLocation = const LatLng(37.7749, -122.4194);
+  double _currentZoom = 15.0;
+
+  late AnimationController _mapLoadingController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    AppLogger.info('MapScreen: Initializing');
+    _mapLoadingController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _mapLoadingController,
+      curve: Curves.easeInOut,
+    );
+    _mapLoadingController.forward();
   }
 
   @override
-  void dispose() {
-    _mapController?.dispose();
-    _mpgController.dispose();
-    _tankRangeController.dispose();
-    super.dispose();
-  }
+  void didUpdateWidget(MapScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
 
-  void _onMapCreated(GoogleMapController controller) {
-    _mapController = controller;
-    _fitMapToMarkers();
-  }
-
-  void _fitMapToMarkers() {
-    final routeProvider = Provider.of<RouteProvider>(context, listen: false);
-
-    if (_mapController == null) {
-      return;
-    }
-    if (routeProvider.startLocation == null ||
-        routeProvider.destinationLocation == null) {
-      return;
+    if (widget.currentTrip != null &&
+        widget.currentTrip != oldWidget.currentTrip) {
+      _updateRoute();
     }
 
-    final bounds = LatLngBounds(
-      southwest: LatLng(
-        routeProvider.startLocation!.latitude <
-                routeProvider.destinationLocation!.latitude
-            ? routeProvider.startLocation!.latitude
-            : routeProvider.destinationLocation!.latitude,
-        routeProvider.startLocation!.longitude <
-                routeProvider.destinationLocation!.longitude
-            ? routeProvider.startLocation!.longitude
-            : routeProvider.destinationLocation!.longitude,
-      ),
-      northeast: LatLng(
-        routeProvider.startLocation!.latitude >
-                routeProvider.destinationLocation!.latitude
-            ? routeProvider.startLocation!.latitude
-            : routeProvider.destinationLocation!.latitude,
-        routeProvider.startLocation!.longitude >
-                routeProvider.destinationLocation!.longitude
-            ? routeProvider.startLocation!.longitude
-            : routeProvider.destinationLocation!.longitude,
-      ),
-    );
-
-    // Add padding for the bottom sheet
-    _mapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(
-        bounds,
-        100.0, // Increased padding
-      ),
-    );
-  }
-
-  void _addCustomStop() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        String label = '';
-
-        return AlertDialog(
-          title: const Text('Add Custom Stop'),
-          content: TextField(
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Stop Label',
-              hintText: 'e.g., Gas, Scenic View',
-            ),
-            onChanged: (value) => label = value,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                if (label.isNotEmpty) {
-                  final routeProvider = Provider.of<RouteProvider>(
-                    context,
-                    listen: false,
-                  );
-                  routeProvider.addCustomStop(label);
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _calculateRoute() async {
-    final routeProvider = Provider.of<RouteProvider>(context, listen: false);
-
-    if (routeProvider.startLocation == null ||
-        routeProvider.destinationLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please set both start and destination locations'),
-        ),
-      );
-      return;
-    }
-
-    final success = await routeProvider.calculateRoute();
-
-    if (mounted) {
-      if (success) {
-        _fitMapToMarkers();
-      } else if (routeProvider.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${routeProvider.errorMessage!}'),
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(label: 'Dismiss', onPressed: () {}),
-          ),
-        );
+    if (widget.currentLocation != oldWidget.currentLocation) {
+      _updateCurrentLocationMarker();
+      if (widget.isTracking) {
+        _animateCameraToLocation(widget.currentLocation!);
       }
     }
   }
 
-  void _showTripSummary() {
-    final routeProvider = Provider.of<RouteProvider>(context, listen: false);
+  void _updateRoute() {
+    if (widget.currentTrip == null) return;
 
-    if (routeProvider.routeData == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please calculate a route first')),
-      );
-      return;
-    }
+    final List<LatLng> points =
+        widget.currentTrip!.route.map((point) => point.toLatLng()).toList();
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => TripSummaryScreen()),
+    setState(() {
+      _polylines = {
+        Polyline(
+          polylineId: const PolylineId('trip_route'),
+          points: points,
+          color: AppColors.primary,
+          width: 5,
+          patterns: [],
+          geodesic: true,
+        ),
+      };
+    });
+  }
+
+  void _updateCurrentLocationMarker() {
+    if (widget.currentLocation == null) return;
+
+    setState(() {
+      _markers = {
+        Marker(
+          markerId: const MarkerId('current_location'),
+          position: widget.currentLocation!,
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 0.5),
+        ),
+      };
+    });
+  }
+
+  void _animateCameraToLocation(LatLng location) {
+    _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(location, _currentZoom),
     );
+  }
+
+  void _onMapCreated(GoogleMapController controller) {
+    _mapController = controller;
+    _setMapStyle();
+
+    if (widget.currentLocation != null) {
+      _animateCameraToLocation(widget.currentLocation!);
+    }
+  }
+
+  void _setMapStyle() async {
+    final String style = await rootBundle.loadString('assets/map_style.json');
+    _mapController?.setMapStyle(style);
+  }
+
+  @override
+  void dispose() {
+    _mapLoadingController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Route Map'),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.blue),
-            onPressed: _showTripSummary,
+      body: Stack(
+        children: [
+          // Map
+          FadeTransition(
+            opacity: _fadeAnimation,
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(
+                target: widget.currentLocation ?? _defaultLocation,
+                zoom: _currentZoom,
+              ),
+              onMapCreated: _onMapCreated,
+              myLocationEnabled: false,
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              compassEnabled: false,
+              mapToolbarEnabled: false,
+              polylines: _polylines,
+              markers: _markers,
+              onCameraMove: (position) {
+                _currentZoom = position.zoom;
+              },
+              mapType: MapType.normal,
+              padding: EdgeInsets.only(bottom: bottomPadding + 80),
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.add, color: Colors.blue),
-            onPressed: _addCustomStop,
+
+          // Speed/Stats Overlay
+          if (widget.isTracking && widget.currentTrip != null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 16,
+              left: 16,
+              right: 16,
+              child: SpeedDisplayOverlay(
+                speed: widget.currentTrip!.averageSpeed,
+                distance: widget.currentTrip!.distance,
+                duration: widget.currentTrip!.duration,
+              ),
+            ),
+
+          // Tracking FAB
+          Positioned(
+            bottom: bottomPadding + 100,
+            right: 16,
+            child: AnimatedTrackingButton(
+              isTracking: widget.isTracking,
+              onPressed: widget.onToggleTracking,
+              animationController: widget.fabAnimationController,
+            ),
+          ),
+
+          // Plan Route FAB
+          Positioned(
+            bottom: bottomPadding + 180,
+            right: 16,
+            child: FloatingActionButton(
+              onPressed: widget.onPlanRoute,
+              backgroundColor: Colors.green,
+              child: const Icon(Icons.add_location),
+              heroTag: 'plan_route',
+            ),
+          ),
+
+          // Center on location button
+          Positioned(
+            bottom: bottomPadding + 260,
+            right: 16,
+            child: FloatingActionButton.small(
+              onPressed: () {
+                if (widget.currentLocation != null) {
+                  _animateCameraToLocation(widget.currentLocation!);
+                }
+              },
+              backgroundColor: Colors.white,
+              child: Icon(
+                Icons.my_location,
+                color: theme.colorScheme.primary,
+              ),
+              heroTag: 'my_location',
+            ),
+          ),
+
+          // Trip Bottom Sheet
+          TripBottomSheet(
+            isTracking: widget.isTracking,
+            currentTrip: widget.currentTrip,
+            animationController: widget.bottomSheetController,
+            onExpand: () {
+              // Handle expansion
+            },
           ),
         ],
-      ),
-      body: Consumer2<LocationProvider, RouteProvider>(
-        builder: (context, locationProvider, routeProvider, child) {
-          return Stack(
-            children: [
-              // Map taking the full screen
-              MapWithRoute(
-                routeData: routeProvider.routeData,
-                startLocation: routeProvider.startLocation,
-                destinationLocation: routeProvider.destinationLocation,
-                stops: routeProvider.stops,
-                onMapCreated: _onMapCreated,
-              ),
-
-              // Semi-transparent overlay at the top for inputs
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(12.0),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 8,
-                        spreadRadius: 1,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LocationInput(
-                        label: 'Start Location',
-                        initialValue: routeProvider.startAddress,
-                        onLocationSelected: (address, lat, lng) {
-                          routeProvider.setStartLocation(
-                            address,
-                            LatLng(lat, lng),
-                          );
-                        },
-                      ),
-                      LocationInput(
-                        label: 'Destination',
-                        initialValue: routeProvider.destinationAddress,
-                        onLocationSelected: (address, lat, lng) {
-                          routeProvider.setDestinationLocation(
-                            address,
-                            LatLng(lat, lng),
-                          );
-                        },
-                      ),
-
-                      // Row with Advanced Settings toggle and Plan Trip button
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          TextButton.icon(
-                            icon: Icon(
-                              _showAdvancedSettings
-                                  ? Icons.arrow_drop_up
-                                  : Icons.arrow_drop_down,
-                              color: Colors.blue,
-                            ),
-                            label: const Text(
-                              'Advanced Settings',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.blue,
-                              ),
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showAdvancedSettings = !_showAdvancedSettings;
-                              });
-                            },
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                            ),
-                          ),
-                          Expanded(
-                            child: ElevatedButton(
-                              onPressed:
-                                  routeProvider.isLoading
-                                      ? null
-                                      : _calculateRoute,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(24),
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8,
-                                ),
-                              ),
-                              child:
-                                  routeProvider.isLoading
-                                      ? SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Colors.white,
-                                              ),
-                                        ),
-                                      )
-                                      : Text(
-                                        'Plan My Trip',
-                                        style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      // Advanced settings content
-                      if (_showAdvancedSettings)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _mpgController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'MPG',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    isDense: true,
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: TextField(
-                                  controller: _tankRangeController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Tank Range (mi)',
-                                    border: OutlineInputBorder(),
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    isDense: true,
-                                  ),
-                                  keyboardType: TextInputType.number,
-                                  style: const TextStyle(fontSize: 14),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Bottom sheet
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                height: MediaQuery.of(context).size.height * _bottomSheetHeight,
-                child: GestureDetector(
-                  onVerticalDragUpdate: (details) {
-                    setState(() {
-                      _bottomSheetHeight -=
-                          details.delta.dy / MediaQuery.of(context).size.height;
-                      _bottomSheetHeight = _bottomSheetHeight.clamp(
-                        _bottomSheetMinHeight,
-                        _bottomSheetMaxHeight,
-                      );
-                    });
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        topRight: Radius.circular(20),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withAlpha(40),
-                          blurRadius: 10,
-                          offset: const Offset(0, -2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        // Handle for dragging with improved visibility
-                        Container(
-                          width: 40,
-                          height: 5,
-                          margin: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-
-                        // Scrollable content with improved styling
-                        Expanded(
-                          child: BottomSheetContent(
-                            onAddCustomStop: _addCustomStop,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              // Floating action buttons for map controls
-              Positioned(
-                right: 16,
-                bottom:
-                    MediaQuery.of(context).size.height * _bottomSheetHeight +
-                    16,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    FloatingActionButton(
-                      mini: true,
-                      heroTag: 'recenter',
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.blue,
-                      onPressed: _fitMapToMarkers,
-                      child: const Icon(Icons.center_focus_strong),
-                    ),
-                    const SizedBox(height: 8),
-                    FloatingActionButton(
-                      mini: true,
-                      heroTag: 'nearby',
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.blue,
-                      onPressed: () {
-                        // TODO: Implement nearby search
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Nearby search coming soon!'),
-                          ),
-                        );
-                      },
-                      child: const Icon(Icons.restaurant),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
       ),
     );
   }

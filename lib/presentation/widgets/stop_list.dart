@@ -1,46 +1,66 @@
 import 'package:flutter/material.dart';
-import '../../data/models/stop.dart';
+import '../../core/models/stop.dart';
+import '../../core/models/food_stop.dart';
+import '../../core/models/fuel_stop.dart';
+import 'stop_card.dart';
 
-class StopList extends StatelessWidget {
+class StopList extends StatefulWidget {
   final List<Stop> stops;
-  final Function(String) onDelete;
+  final Function(List<Stop>) onReorder;
+  final Function(String) onRemove;
+  final Function(Stop) onStopTap;
 
-  const StopList({Key? key, required this.stops, required this.onDelete})
-    : super(key: key);
+  const StopList({
+    super.key,
+    required this.stops,
+    required this.onReorder,
+    required this.onRemove,
+    required this.onStopTap,
+  });
 
   @override
+  State<StopList> createState() => _StopListState();
+}
+
+class _StopListState extends State<StopList> {
+  @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      shrinkWrap: true,
-      itemCount: stops.length,
+    if (widget.stops.isEmpty) {
+      return const Center(
+        child: Text(
+          'No stops added yet\nTap the + button to add stops',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.grey),
+        ),
+      );
+    }
+
+    return ReorderableListView.builder(
+      itemCount: widget.stops.length,
+      onReorder: (oldIndex, newIndex) {
+        if (newIndex > oldIndex) newIndex -= 1;
+
+        final stops = List<Stop>.from(widget.stops);
+        final stop = stops.removeAt(oldIndex);
+        stops.insert(newIndex, stop);
+
+        widget.onReorder(stops);
+      },
       itemBuilder: (context, index) {
-        final stop = stops[index];
-        return Dismissible(
-          key: Key(stop.id),
-          background: Container(
-            color: Colors.red,
-            alignment: Alignment.centerRight,
-            padding: EdgeInsets.only(right: 16),
-            child: Icon(Icons.delete, color: Colors.white),
-          ),
-          direction: DismissDirection.endToStart,
-          onDismissed: (_) => onDelete(stop.id),
-          child: ListTile(
-            title: Text(stop.label),
-            subtitle: Text(_formatTime(stop.plannedTime)),
-            trailing: Text('${stop.dwellTime.inMinutes} min'),
-          ),
+        final stop = widget.stops[index];
+        final isFirst = index == 0;
+        final isLast = index == widget.stops.length - 1;
+
+        return StopCard(
+          key: ValueKey(stop.id),
+          stop: stop,
+          index: index,
+          isFirst: isFirst,
+          isLast: isLast,
+          onTap: () => widget.onStopTap(stop),
+          onRemove: isFirst || isLast ? null : () => widget.onRemove(stop.id),
         );
       },
     );
-  }
-
-  // Helper to format time
-  String _formatTime(DateTime time) {
-    final hour = time.hour;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final hourDisplay = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-    return '$hourDisplay:$minute $period';
   }
 }

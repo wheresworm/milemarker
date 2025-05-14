@@ -1,142 +1,250 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../utils/logger.dart';
+import '../models/place.dart';
+import '../config/api_config.dart';
 
 class PlacesService {
-  final String apiKey;
-  final http.Client client;
+  static const String _placesUrl = 'https://maps.googleapis.com/maps/api/place';
+  final String apiKey = ApiConfig.googleApiKey;
 
-  PlacesService({String? apiKey, http.Client? client})
-    : apiKey = apiKey ?? dotenv.env['GOOGLE_API_KEY'] ?? '',
-      client = client ?? http.Client();
+  PlacesService();
 
-  // Get suggestions for a location search
-  Future<List<Map<String, dynamic>>> getPlaceSuggestions(String input) async {
-    if (input.isEmpty) return [];
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/place/autocomplete/json'
-      '?input=$input'
-      '&key=$apiKey'
-      '&components=country:us',
+  // Search for places by text query
+  Future<List<Place>> searchPlaces({
+    required String query,
+    LatLng? location,
+    int radius = 50000, // 50km default
+  }) async {
+    final uri = Uri.parse('$_placesUrl/textsearch/json').replace(
+      queryParameters: {
+        'query': query,
+        if (location != null)
+          'location': '${location.latitude},${location.longitude}',
+        if (location != null) 'radius': radius.toString(),
+        'key': apiKey,
+      },
     );
 
-    AppLogger.info('PlacesService: Fetching suggestions for: $input');
+    final response = await http.get(uri);
 
-    try {
-      final response = await client.get(url);
-
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        if (result['status'] == 'OK') {
-          AppLogger.info(
-            'PlacesService: Found ${result['predictions'].length} suggestions',
-          );
-          return List<Map<String, dynamic>>.from(result['predictions']);
-        } else {
-          AppLogger.warning(
-            'PlacesService: API returned status: ${result['status']}',
-          );
-          if (result.containsKey('error_message')) {
-            AppLogger.warning('PlacesService: ${result['error_message']}');
-          }
-        }
-      } else {
-        AppLogger.severe('PlacesService: HTTP error ${response.statusCode}');
-      }
-    } catch (e) {
-      AppLogger.severe('PlacesService: Error fetching suggestions: $e');
+    if (response.statusCode != 200) {
+      throw Exception('Failed to search places: ${response.statusCode}');
     }
 
-    return [];
-  }
+    final json = jsonDecode(response.body);
 
-  // Get details of a place
-  Future<Map<String, dynamic>?> getPlaceDetails(String placeId) async {
-    if (placeId.isEmpty) return null;
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/place/details/json'
-      '?place_id=$placeId'
-      '&key=$apiKey'
-      '&fields=geometry,formatted_address,name',
-    );
-
-    AppLogger.info('PlacesService: Fetching details for place: $placeId');
-
-    try {
-      final response = await client.get(url);
-
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        if (result['status'] == 'OK') {
-          AppLogger.info('PlacesService: Successfully fetched place details');
-          return result['result'];
-        } else {
-          AppLogger.warning(
-            'PlacesService: API returned status: ${result['status']}',
-          );
-          if (result.containsKey('error_message')) {
-            AppLogger.warning('PlacesService: ${result['error_message']}');
-          }
-        }
-      } else {
-        AppLogger.severe('PlacesService: HTTP error ${response.statusCode}');
-      }
-    } catch (e) {
-      AppLogger.severe('PlacesService: Error fetching place details: $e');
+    if (json['status'] != 'OK') {
+      throw Exception('Places API error: ${json['status']}');
     }
 
-    return null;
+    return (json['results'] as List)
+        .map((place) => _placeFromJson(place))
+        .toList();
   }
 
-  // Search for nearby places
-  Future<List<Map<String, dynamic>>> searchNearbyPlaces({
+  // Search nearby places
+  Future<List<Place>> searchNearby({
     required LatLng location,
-    required String type,
-    int radius = 5000,
+    required int radius,
+    List<PlaceType>? types,
     String? keyword,
   }) async {
-    final keywordParam = keyword != null ? '&keyword=$keyword' : '';
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
-      '?location=${location.latitude},${location.longitude}'
-      '&radius=$radius'
-      '&type=$type'
-      '$keywordParam'
-      '&key=$apiKey',
+    final uri = Uri.parse('$_placesUrl/nearbysearch/json').replace(
+      queryParameters: {
+        'location': '${location.latitude},${location.longitude}',
+        'radius': radius.toString(),
+        if (types != null) 'type': _typeToString(types.first),
+        if (keyword != null) 'keyword': keyword,
+        'key': apiKey,
+      },
     );
 
-    AppLogger.info('PlacesService: Searching nearby places of type: $type');
+    final response = await http.get(uri);
 
-    try {
-      final response = await client.get(url);
-
-      if (response.statusCode == 200) {
-        final result = json.decode(response.body);
-        if (result['status'] == 'OK') {
-          AppLogger.info(
-            'PlacesService: Found ${result['results'].length} nearby places',
-          );
-          return List<Map<String, dynamic>>.from(result['results']);
-        } else {
-          AppLogger.warning(
-            'PlacesService: API returned status: ${result['status']}',
-          );
-          if (result.containsKey('error_message')) {
-            AppLogger.warning('PlacesService: ${result['error_message']}');
-          }
-        }
-      } else {
-        AppLogger.severe('PlacesService: HTTP error ${response.statusCode}');
-      }
-    } catch (e) {
-      AppLogger.severe('PlacesService: Error searching nearby places: $e');
+    if (response.statusCode != 200) {
+      throw Exception('Failed to search nearby: ${response.statusCode}');
     }
 
-    return [];
+    final json = jsonDecode(response.body);
+
+    if (json['status'] != 'OK') {
+      throw Exception('Places API error: ${json['status']}');
+    }
+
+    return (json['results'] as List)
+        .map((place) => _placeFromJson(place))
+        .toList();
   }
+
+  // Get place details
+  Future<Place> getPlaceDetails(String placeId) async {
+    final uri = Uri.parse('$_placesUrl/details/json').replace(
+      queryParameters: {
+        'place_id': placeId,
+        'fields': 'place_id,name,geometry,formatted_address,types,rating,'
+            'user_ratings_total,price_level,photos,opening_hours,'
+            'formatted_phone_number,website',
+        'key': apiKey,
+      },
+    );
+
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to get place details: ${response.statusCode}');
+    }
+
+    final json = jsonDecode(response.body);
+
+    if (json['status'] != 'OK') {
+      throw Exception('Places API error: ${json['status']}');
+    }
+
+    return _placeFromJson(json['result'], detailed: true);
+  }
+
+  // Autocomplete place search
+  Future<List<AutocompletePrediction>> autocomplete({
+    required String input,
+    LatLng? location,
+    int radius = 50000,
+  }) async {
+    final uri = Uri.parse('$_placesUrl/autocomplete/json').replace(
+      queryParameters: {
+        'input': input,
+        if (location != null)
+          'location': '${location.latitude},${location.longitude}',
+        if (location != null) 'radius': radius.toString(),
+        'types': 'establishment',
+        'key': apiKey,
+      },
+    );
+
+    final response = await http.get(uri);
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to autocomplete: ${response.statusCode}');
+    }
+
+    final json = jsonDecode(response.body);
+
+    if (json['status'] != 'OK' && json['status'] != 'ZERO_RESULTS') {
+      throw Exception('Places API error: ${json['status']}');
+    }
+
+    return (json['predictions'] as List)
+        .map((pred) => AutocompletePrediction.fromJson(pred))
+        .toList();
+  }
+
+  Place _placeFromJson(Map<String, dynamic> json, {bool detailed = false}) {
+    return Place(
+      id: json['place_id'],
+      name: json['name'],
+      location: LatLng(
+        json['geometry']['location']['lat'],
+        json['geometry']['location']['lng'],
+      ),
+      address: json['formatted_address'] ?? json['vicinity'] ?? '',
+      type: _typeFromJson(json['types'] ?? []),
+      rating: json['rating']?.toDouble(),
+      userRatingsTotal: json['user_ratings_total'],
+      priceLevel: _priceLevelFromJson(json['price_level']),
+      photos: (json['photos'] as List?)
+              ?.map((photo) => photo['photo_reference'] as String)
+              .toList() ??
+          [],
+      openingHours: detailed && json['opening_hours'] != null
+          ? OpeningHours(
+              isOpenNow: json['opening_hours']['open_now'] ?? false,
+              weekdayText: List<String>.from(
+                json['opening_hours']['weekday_text'] ?? [],
+              ),
+              periods: (json['opening_hours']['periods'] as List?)
+                      ?.map((period) => Period(
+                            dayOfWeek: period['open']['day'],
+                            openTime: period['open']['time'] != null
+                                ? int.parse(period['open']['time'])
+                                : 0,
+                            closeTime: period['close']?['time'] != null
+                                ? int.parse(period['close']['time'])
+                                : 2359,
+                          ))
+                      .toList() ??
+                  [],
+            )
+          : null,
+      phoneNumber: json['formatted_phone_number'],
+      website: json['website'],
+    );
+  }
+
+  PlaceType _typeFromJson(List<dynamic> types) {
+    if (types.contains('restaurant') || types.contains('food')) {
+      return PlaceType.restaurant;
+    } else if (types.contains('gas_station')) {
+      return PlaceType.gasStation;
+    } else if (types.contains('lodging')) {
+      return PlaceType.hotel;
+    } else if (types.contains('rest_stop')) {
+      return PlaceType.restArea;
+    } else if (types.contains('tourist_attraction')) {
+      return PlaceType.attraction;
+    }
+    return PlaceType.other;
+  }
+
+  String _typeToString(PlaceType type) {
+    switch (type) {
+      case PlaceType.restaurant:
+        return 'restaurant';
+      case PlaceType.gasStation:
+        return 'gas_station';
+      case PlaceType.hotel:
+        return 'lodging';
+      case PlaceType.restArea:
+        return 'rest_stop';
+      case PlaceType.attraction:
+        return 'tourist_attraction';
+      default:
+        return 'establishment';
+    }
+  }
+
+  PriceLevel? _priceLevelFromJson(int? level) {
+    switch (level) {
+      case 0:
+        return PriceLevel.free;
+      case 1:
+        return PriceLevel.cheap;
+      case 2:
+        return PriceLevel.moderate;
+      case 3:
+        return PriceLevel.expensive;
+      case 4:
+        return PriceLevel.veryExpensive;
+      default:
+        return null;
+    }
+  }
+}
+
+class AutocompletePrediction {
+  final String description;
+  final String placeId;
+  final List<String> types;
+
+  AutocompletePrediction({
+    required this.description,
+    required this.placeId,
+    required this.types,
+  });
+
+  factory AutocompletePrediction.fromJson(Map<String, dynamic> json) =>
+      AutocompletePrediction(
+        description: json['description'],
+        placeId: json['place_id'],
+        types: List<String>.from(json['types'] ?? []),
+      );
 }
