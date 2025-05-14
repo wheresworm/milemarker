@@ -58,10 +58,8 @@ void main() async {
   final routeService = RouteService(
     directionsService: directionsService,
     placesService: placesService,
-    databaseService: databaseService,
     foodStopService: foodStopService,
     fuelPlanningService: fuelPlanningService,
-    optimizationService: optimizationService,
   );
 
   runApp(
