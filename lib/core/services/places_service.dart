@@ -1,221 +1,260 @@
+import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:http/http.dart' as http;
 import '../models/place.dart';
-import '../config/api_config.dart';
+import '../models/time_window.dart';
 
 class PlacesService {
-  static const String _placesUrl = 'https://maps.googleapis.com/maps/api/place';
-  final String apiKey = ApiConfig.googleApiKey;
+  final String? _apiKey = dotenv.env['GOOGLE_PLACES_API_KEY'];
+  final http.Client _httpClient = http.Client();
+  Timer? _debounceTimer;
 
-  PlacesService();
-
-  // Search for places by text query
   Future<List<Place>> searchPlaces({
     required String query,
     LatLng? location,
-    int radius = 50000, // 50km default
+    double radiusMeters = 50000,
+    PlaceType? type,
   }) async {
-    final uri = Uri.parse('$_placesUrl/textsearch/json').replace(
-      queryParameters: {
-        'query': query,
-        if (location != null)
-          'location': '${location.latitude},${location.longitude}',
-        if (location != null) 'radius': radius.toString(),
-        'key': apiKey,
-      },
-    );
-
-    final response = await http.get(uri);
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to search places: ${response.statusCode}');
+    if (_apiKey == null) {
+      throw Exception('Google Places API key not found');
     }
 
-    final json = jsonDecode(response.body);
+    _debounceTimer?.cancel();
+    final completer = Completer<List<Place>>();
 
-    if (json['status'] != 'OK') {
-      throw Exception('Places API error: ${json['status']}');
-    }
+    _debounceTimer = Timer(const Duration(milliseconds: 300), () async {
+      try {
+        final typeString = _getPlaceTypeString(type);
+        final locationParam = location != null
+            ? '&location=${location.latitude},${location.longitude}'
+            : '';
+        final typeParam = typeString != null ? '&type=$typeString' : '';
 
-    return (json['results'] as List)
-        .map((place) => _placeFromJson(place))
-        .toList();
+        final url = Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/textsearch/json'
+          '?query=${Uri.encodeComponent(query)}'
+          '$locationParam'
+          '&radius=$radiusMeters'
+          '$typeParam'
+          '&key=$_apiKey',
+        );
+
+        final response = await _httpClient.get(url);
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          final results = data['results'] as List;
+          final places =
+              results.map((result) => _parsePlaceFromSearch(result)).toList();
+          completer.complete(places);
+        } else {
+          completer.completeError(
+            Exception('Failed to search places: ${response.statusCode}'),
+          );
+        }
+      } catch (e) {
+        completer.completeError(e);
+      }
+    });
+
+    return completer.future;
   }
 
-  // Search nearby places
-  Future<List<Place>> searchNearby({
-    required LatLng location,
-    required int radius,
-    List<PlaceType>? types,
-    String? keyword,
+  Future<List<Place>> searchAlongRoute({
+    required List<LatLng> routePoints,
+    required PlaceType type,
+    double maxDetourMeters = 5000,
   }) async {
-    final uri = Uri.parse('$_placesUrl/nearbysearch/json').replace(
-      queryParameters: {
-        'location': '${location.latitude},${location.longitude}',
-        'radius': radius.toString(),
-        if (types != null) 'type': _typeToString(types.first),
-        if (keyword != null) 'keyword': keyword,
-        'key': apiKey,
-      },
-    );
-
-    final response = await http.get(uri);
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to search nearby: ${response.statusCode}');
+    if (_apiKey == null) {
+      throw Exception('Google Places API key not found');
     }
 
-    final json = jsonDecode(response.body);
+    final places = <Place>[];
 
-    if (json['status'] != 'OK') {
-      throw Exception('Places API error: ${json['status']}');
+    // Sample route points to reduce API calls
+    final sampleSize = routePoints.length > 20 ? 20 : routePoints.length;
+    final step = routePoints.length ~/ sampleSize;
+
+    for (int i = 0; i < routePoints.length; i += step) {
+      final point = routePoints[i];
+      final typeString = _getPlaceTypeString(type);
+
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/nearbysearch/json'
+        '?location=${point.latitude},${point.longitude}'
+        '&radius=$maxDetourMeters'
+        '&type=$typeString'
+        '&key=$_apiKey',
+      );
+
+      final response = await _httpClient.get(url);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final results = data['results'] as List;
+
+        for (final result in results) {
+          final place = _parsePlaceFromSearch(result);
+
+          // Calculate actual detour distance (simplified)
+          final detour = _calculateDetour(
+            routePoints: routePoints,
+            placeLocation: place.location,
+          );
+
+          if (detour <= maxDetourMeters &&
+              !places.any((p) => p.placeId == place.placeId)) {
+            places.add(place.copyWith(distanceFromRoute: detour));
+          }
+        }
+      }
     }
 
-    return (json['results'] as List)
-        .map((place) => _placeFromJson(place))
-        .toList();
+    return places;
   }
 
-  // Get place details
-  Future<Place> getPlaceDetails(String placeId) async {
-    final uri = Uri.parse('$_placesUrl/details/json').replace(
-      queryParameters: {
-        'place_id': placeId,
-        'fields': 'place_id,name,geometry,formatted_address,types,rating,'
-            'user_ratings_total,price_level,photos,opening_hours,'
-            'formatted_phone_number,website',
-        'key': apiKey,
-      },
+  Future<Place?> getPlaceDetails(String placeId) async {
+    if (_apiKey == null) {
+      throw Exception('Google Places API key not found');
+    }
+
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/place/details/json'
+      '?place_id=$placeId'
+      '&fields=place_id,name,geometry,formatted_address,types,rating,'
+      'user_ratings_total,price_level,opening_hours,photos,formatted_phone_number,website'
+      '&key=$_apiKey',
     );
 
-    final response = await http.get(uri);
+    final response = await _httpClient.get(url);
 
-    if (response.statusCode != 200) {
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final result = data['result'];
+      return _parsePlaceFromDetails(result);
+    } else {
       throw Exception('Failed to get place details: ${response.statusCode}');
     }
-
-    final json = jsonDecode(response.body);
-
-    if (json['status'] != 'OK') {
-      throw Exception('Places API error: ${json['status']}');
-    }
-
-    return _placeFromJson(json['result'], detailed: true);
   }
 
-  // Autocomplete place search
-  Future<List<AutocompletePrediction>> autocomplete({
-    required String input,
-    LatLng? location,
-    int radius = 50000,
-  }) async {
-    final uri = Uri.parse('$_placesUrl/autocomplete/json').replace(
-      queryParameters: {
-        'input': input,
-        if (location != null)
-          'location': '${location.latitude},${location.longitude}',
-        if (location != null) 'radius': radius.toString(),
-        'types': 'establishment',
-        'key': apiKey,
-      },
-    );
+  Place _parsePlaceFromSearch(Map<String, dynamic> result) {
+    final location = result['geometry']['location'];
+    final types = List<String>.from(result['types'] ?? []);
 
-    final response = await http.get(uri);
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to autocomplete: ${response.statusCode}');
-    }
-
-    final json = jsonDecode(response.body);
-
-    if (json['status'] != 'OK' && json['status'] != 'ZERO_RESULTS') {
-      throw Exception('Places API error: ${json['status']}');
-    }
-
-    return (json['predictions'] as List)
-        .map((pred) => AutocompletePrediction.fromJson(pred))
-        .toList();
-  }
-
-  Place _placeFromJson(Map<String, dynamic> json, {bool detailed = false}) {
     return Place(
-      id: json['place_id'],
-      name: json['name'],
-      location: LatLng(
-        json['geometry']['location']['lat'],
-        json['geometry']['location']['lng'],
-      ),
-      address: json['formatted_address'] ?? json['vicinity'] ?? '',
-      type: _typeFromJson(json['types'] ?? []),
-      rating: json['rating']?.toDouble(),
-      userRatingsTotal: json['user_ratings_total'],
-      priceLevel: _priceLevelFromJson(json['price_level']),
-      photos: (json['photos'] as List?)
-              ?.map((photo) => photo['photo_reference'] as String)
-              .toList() ??
-          [],
-      openingHours: detailed && json['opening_hours'] != null
-          ? OpeningHours(
-              isOpenNow: json['opening_hours']['open_now'] ?? false,
-              weekdayText: List<String>.from(
-                json['opening_hours']['weekday_text'] ?? [],
-              ),
-              periods: (json['opening_hours']['periods'] as List?)
-                      ?.map((period) => Period(
-                            dayOfWeek: period['open']['day'],
-                            openTime: period['open']['time'] != null
-                                ? int.parse(period['open']['time'])
-                                : 0,
-                            closeTime: period['close']?['time'] != null
-                                ? int.parse(period['close']['time'])
-                                : 2359,
-                          ))
-                      .toList() ??
-                  [],
-            )
-          : null,
-      phoneNumber: json['formatted_phone_number'],
-      website: json['website'],
+      id: result['place_id'],
+      placeId: result['place_id'],
+      name: result['name'],
+      location: LatLng(location['lat'], location['lng']),
+      address: result['formatted_address'] ?? result['vicinity'],
+      type: _getPlaceTypeFromTypes(types),
+      rating: result['rating']?.toDouble(),
+      reviewCount: result['user_ratings_total'],
+      priceLevel: _parsePriceLevel(result['price_level']),
+      openingHours: _parseOpeningHours(result['opening_hours']),
+      photoUrl: _getPhotoUrl(result['photos']),
     );
   }
 
-  PlaceType _typeFromJson(List<dynamic> types) {
+  Place _parsePlaceFromDetails(Map<String, dynamic> result) {
+    final location = result['geometry']['location'];
+    final types = List<String>.from(result['types'] ?? []);
+
+    return Place(
+      id: result['place_id'],
+      placeId: result['place_id'],
+      name: result['name'],
+      location: LatLng(location['lat'], location['lng']),
+      address: result['formatted_address'],
+      type: _getPlaceTypeFromTypes(types),
+      rating: result['rating']?.toDouble(),
+      reviewCount: result['user_ratings_total'],
+      priceLevel: _parsePriceLevel(result['price_level']),
+      openingHours: _parseOpeningHours(result['opening_hours']),
+      photoUrl: _getPhotoUrl(result['photos']),
+      phoneNumber: result['formatted_phone_number'],
+      website: result['website'],
+    );
+  }
+
+  OpeningHours? _parseOpeningHours(Map<String, dynamic>? openingHours) {
+    if (openingHours == null) return null;
+
+    final periods = <OpeningPeriod>[];
+    final periodsList = openingHours['periods'] as List?;
+
+    if (periodsList != null) {
+      for (final period in periodsList) {
+        final open = period['open'];
+        final close = period['close'];
+
+        if (open != null && close != null) {
+          periods.add(OpeningPeriod(
+            day: open['day'],
+            open: _parseTime(open['time']),
+            close: _parseTime(close['time']),
+          ));
+        }
+      }
+    }
+
+    return OpeningHours(
+      openNow: openingHours['open_now'] ?? false,
+      periods: periods,
+    );
+  }
+
+  TimeOfDay _parseTime(String time) {
+    final hour = int.parse(time.substring(0, 2));
+    final minute = int.parse(time.substring(2, 4));
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  PlaceType _getPlaceTypeFromTypes(List<String> types) {
     if (types.contains('restaurant') || types.contains('food')) {
       return PlaceType.restaurant;
     } else if (types.contains('gas_station')) {
       return PlaceType.gasStation;
+    } else if (types.contains('convenience_store')) {
+      return PlaceType.convenienceStore;
     } else if (types.contains('lodging')) {
       return PlaceType.hotel;
-    } else if (types.contains('rest_stop')) {
-      return PlaceType.restArea;
     } else if (types.contains('tourist_attraction')) {
-      return PlaceType.attraction;
+      return PlaceType.touristAttraction;
     }
     return PlaceType.other;
   }
 
-  String _typeToString(PlaceType type) {
+  String? _getPlaceTypeString(PlaceType? type) {
+    if (type == null) return null;
+
     switch (type) {
       case PlaceType.restaurant:
         return 'restaurant';
       case PlaceType.gasStation:
         return 'gas_station';
+      case PlaceType.convenienceStore:
+        return 'convenience_store';
       case PlaceType.hotel:
         return 'lodging';
       case PlaceType.restArea:
         return 'rest_stop';
+      case PlaceType.touristAttraction:
+        return 'tourist_attraction';
       case PlaceType.attraction:
         return 'tourist_attraction';
-      default:
-        return 'establishment';
+      case PlaceType.other:
+        return null;
     }
   }
 
-  PriceLevel? _priceLevelFromJson(int? level) {
+  PriceLevel? _parsePriceLevel(int? level) {
+    if (level == null) return null;
+
     switch (level) {
-      case 0:
-        return PriceLevel.free;
       case 1:
         return PriceLevel.cheap;
       case 2:
@@ -228,23 +267,60 @@ class PlacesService {
         return null;
     }
   }
-}
 
-class AutocompletePrediction {
-  final String description;
-  final String placeId;
-  final List<String> types;
+  String? _getPhotoUrl(List<dynamic>? photos) {
+    if (photos == null || photos.isEmpty) return null;
 
-  AutocompletePrediction({
-    required this.description,
-    required this.placeId,
-    required this.types,
-  });
+    final photo = photos.first;
+    final photoReference = photo['photo_reference'];
 
-  factory AutocompletePrediction.fromJson(Map<String, dynamic> json) =>
-      AutocompletePrediction(
-        description: json['description'],
-        placeId: json['place_id'],
-        types: List<String>.from(json['types'] ?? []),
-      );
+    if (photoReference == null) return null;
+
+    return 'https://maps.googleapis.com/maps/api/place/photo'
+        '?maxwidth=400'
+        '&photo_reference=$photoReference'
+        '&key=$_apiKey';
+  }
+
+  double _calculateDetour({
+    required List<LatLng> routePoints,
+    required LatLng placeLocation,
+  }) {
+    // Simple approximation - find nearest point on route
+    double minDistance = double.infinity;
+
+    for (final point in routePoints) {
+      final distance = _calculateDistance(point, placeLocation);
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+
+    return minDistance;
+  }
+
+  double _calculateDistance(LatLng p1, LatLng p2) {
+    const double earthRadius = 6371000; // meters
+    final double lat1Rad = p1.latitude * (3.141592653589793 / 180);
+    final double lat2Rad = p2.latitude * (3.141592653589793 / 180);
+    final double deltaLat =
+        (p2.latitude - p1.latitude) * (3.141592653589793 / 180);
+    final double deltaLng =
+        (p2.longitude - p1.longitude) * (3.141592653589793 / 180);
+
+    final double a = (deltaLat / 2).sin() * (deltaLat / 2).sin() +
+        lat1Rad.cos() *
+            lat2Rad.cos() *
+            (deltaLng / 2).sin() *
+            (deltaLng / 2).sin();
+
+    final double c = 2 * a.sqrt().asin();
+
+    return earthRadius * c;
+  }
+
+  void dispose() {
+    _debounceTimer?.cancel();
+    _httpClient.close();
+  }
 }

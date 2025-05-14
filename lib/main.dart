@@ -1,83 +1,28 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
-import 'core/models/trip.dart';
-import 'core/services/database_service.dart';
-import 'core/services/location_service.dart';
-import 'core/services/notification_service.dart';
-import 'core/services/tracking_service.dart';
-import 'core/services/preferences_service.dart';
-import 'core/services/places_service.dart';
-import 'core/services/route_service.dart';
-import 'core/services/directions_service.dart';
-import 'core/services/food_stop_service.dart';
-import 'core/services/fuel_planning_service.dart';
-import 'core/services/route_optimization_service.dart';
-import 'core/utils/constants.dart';
-import 'presentation/controllers/theme_controller.dart';
-import 'presentation/controllers/places_controller.dart';
-import 'presentation/controllers/route_controller.dart';
-import 'presentation/screens/map_screen.dart';
+import 'presentation/screens/home_screen.dart';
 import 'presentation/screens/trips_screen.dart';
 import 'presentation/screens/settings_screen.dart';
-import 'presentation/screens/route_builder_screen.dart';
-import 'presentation/widgets/animated_logo.dart';
+import 'presentation/controllers/route_controller.dart';
+import 'presentation/controllers/meal_stop_controller.dart';
+import 'presentation/controllers/places_controller.dart';
+import 'presentation/widgets/splash_screen.dart';
+import 'presentation/controllers/theme_controller.dart';
+import 'core/services/database_service.dart';
+import 'core/services/location_service.dart';
+import 'core/services/route_service.dart';
+import 'core/services/directions_service.dart';
+import 'core/services/places_service.dart';
+import 'core/services/food_stop_service.dart';
+import 'core/services/fuel_planning_service.dart';
+import 'core/services/tracking_service.dart';
+import 'core/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Load environment variables
-  await dotenv.load(fileName: ".env");
-
-  // Initialize services
-  final databaseService = DatabaseService();
-  await databaseService.init();
-  await NotificationService().init();
-  await PreferencesService().init();
-
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.dark,
-    ),
-  );
-
-  // Create services with correct parameters
-  final directionsService = DirectionsService();
-  final placesService = PlacesService();
-  final foodStopService = FoodStopService(
-    directionsService: directionsService,
-    placesService: placesService,
-  );
-  final fuelPlanningService = FuelPlanningService(
-    placesService: placesService,
-  );
-  final optimizationService = RouteOptimizationService();
-  final routeService = RouteService(
-    directionsService: directionsService,
-    placesService: placesService,
-    databaseService: databaseService,
-    foodStopService: foodStopService,
-    fuelPlanningService: fuelPlanningService,
-    optimizationService: optimizationService,
-  );
-
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => ThemeController()),
-        ChangeNotifierProvider(create: (_) => PlacesController(placesService)),
-        ChangeNotifierProvider(
-            create: (_) => RouteController(
-                  routeService,
-                  databaseService,
-                )),
-      ],
-      child: const MileMarkerApp(),
-    ),
-  );
+  await dotenv.load();
+  runApp(const MileMarkerApp());
 }
 
 class MileMarkerApp extends StatelessWidget {
@@ -85,41 +30,116 @@ class MileMarkerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeController = context.watch<ThemeController>();
+    return MultiProvider(
+      providers: [
+        // Core services (lowest level dependencies first)
+        Provider<DatabaseService>(
+          create: (_) => DatabaseService(),
+        ),
+        Provider<LocationService>(
+          create: (_) => LocationService(),
+        ),
+        Provider<PlacesService>(
+          create: (_) => PlacesService(),
+        ),
+        Provider<DirectionsService>(
+          create: (_) => DirectionsService(),
+        ),
 
-    return MaterialApp(
-      title: 'MileMarker',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          brightness: Brightness.light,
+        // Services that depend on other services
+        ProxyProvider<PlacesService, FoodStopService>(
+          create: (context) => FoodStopService(
+            placesService: context.read<PlacesService>(),
+          ),
+          update: (context, placesService, previous) =>
+              previous ?? FoodStopService(placesService: placesService),
         ),
-        useMaterial3: true,
-        appBarTheme: const AppBarTheme(
-          elevation: 0,
-          centerTitle: true,
+        ProxyProvider<PlacesService, FuelPlanningService>(
+          create: (context) => FuelPlanningService(
+            placesService: context.read<PlacesService>(),
+          ),
+          update: (context, placesService, previous) =>
+              previous ?? FuelPlanningService(placesService: placesService),
         ),
-        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          elevation: 8,
-          type: BottomNavigationBarType.fixed,
-          showSelectedLabels: true,
-          showUnselectedLabels: true,
+
+        // Route service with all its dependencies
+        ProxyProvider5<DatabaseService, PlacesService, DirectionsService,
+            FoodStopService, FuelPlanningService, RouteService>(
+          create: (context) => RouteService(
+            databaseService: context.read<DatabaseService>(),
+            placesService: context.read<PlacesService>(),
+            directionsService: context.read<DirectionsService>(),
+            foodStopService: context.read<FoodStopService>(),
+            fuelPlanningService: context.read<FuelPlanningService>(),
+          ),
+          update: (context, db, places, directions, food, fuel, previous) =>
+              previous ??
+              RouteService(
+                databaseService: db,
+                placesService: places,
+                directionsService: directions,
+                foodStopService: food,
+                fuelPlanningService: fuel,
+              ),
         ),
+
+        ProxyProvider2<LocationService, RouteService, TrackingService>(
+          create: (context) => TrackingService(
+            locationService: context.read<LocationService>(),
+            routeService: context.read<RouteService>(),
+          ),
+          update: (context, locationService, routeService, previous) =>
+              previous ??
+              TrackingService(
+                locationService: locationService,
+                routeService: routeService,
+              ),
+        ),
+
+        // Controllers
+        ChangeNotifierProvider<ThemeController>(
+          create: (_) => ThemeController(),
+        ),
+        ChangeNotifierProxyProvider2<RouteService, DirectionsService,
+            RouteController>(
+          create: (context) => RouteController(
+            routeService: context.read<RouteService>(),
+            directionsService: context.read<DirectionsService>(),
+          ),
+          update: (context, routeService, directionsService, previous) =>
+              previous ??
+              RouteController(
+                routeService: routeService,
+                directionsService: directionsService,
+              ),
+        ),
+        ChangeNotifierProxyProvider<FoodStopService, MealStopController>(
+          create: (context) => MealStopController(
+            foodStopService: context.read<FoodStopService>(),
+          ),
+          update: (context, foodStopService, previous) =>
+              previous ?? MealStopController(foodStopService: foodStopService),
+        ),
+        ChangeNotifierProxyProvider<PlacesService, PlacesController>(
+          create: (context) => PlacesController(
+            placesService: context.read<PlacesService>(),
+          ),
+          update: (context, placesService, previous) =>
+              previous ?? PlacesController(placesService: placesService),
+        ),
+      ],
+      child: Consumer<ThemeController>(
+        builder: (context, themeController, _) {
+          return MaterialApp(
+            title: 'MileMarker',
+            theme: AppTheme.lightTheme(),
+            darkTheme: AppTheme.darkTheme(),
+            themeMode: themeController.themeMode,
+            home: const SplashScreen(),
+            debugShowCheckedModeBanner: false,
+          );
+        },
       ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
-      themeMode: themeController.themeMode,
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const SplashScreen(),
-        '/home': (context) => const MainScreen(),
-        '/route-builder': (context) => const RouteBuilderScreen(),
-      },
     );
   }
 }
@@ -131,102 +151,29 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
+class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
-  late AnimationController _fabAnimationController;
-  late AnimationController _bottomSheetAnimationController;
-  late DraggableScrollableController _draggableController;
 
-  final TrackingService _trackingService = TrackingService();
-  final LocationService _locationService = LocationService();
-
-  bool _isTracking = false;
-  Trip? _currentTrip;
-  LatLng? _currentLocation;
-
-  @override
-  void initState() {
-    super.initState();
-    _fabAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-    _bottomSheetAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 400),
-      vsync: this,
-    );
-    _draggableController = DraggableScrollableController();
-    _initializeServices();
-  }
-
-  void _initializeServices() async {
-    await _locationService.requestPermissions();
-    _locationService.locationStream.listen((location) {
-      if (mounted) {
-        setState(() {
-          _currentLocation = LatLng(location.latitude, location.longitude);
-        });
-      }
-    });
-  }
-
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
-
-  void _toggleTracking() async {
-    HapticFeedback.lightImpact();
-
-    if (_isTracking) {
-      // Stop tracking
-      await _trackingService.stopTracking();
-      _fabAnimationController.reverse();
-    } else {
-      // Start tracking
-      await _trackingService.startTracking();
-      _fabAnimationController.forward();
-    }
-
-    setState(() {
-      _isTracking = !_isTracking;
-      _currentTrip = _trackingService.currentTrip;
-    });
-  }
-
-  @override
-  void dispose() {
-    _fabAnimationController.dispose();
-    _bottomSheetAnimationController.dispose();
-    _draggableController.dispose();
-    super.dispose();
-  }
+  static const List<Widget> _screens = [
+    HomeScreen(),
+    TripsScreen(),
+    SettingsScreen(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
-        children: [
-          MapScreen(
-            isTracking: _isTracking,
-            currentTrip: _currentTrip,
-            currentLocation: _currentLocation,
-            onToggleTracking: _toggleTracking,
-            onPlanRoute: () {
-              Navigator.pushNamed(context, '/route-builder');
-            },
-            fabAnimationController: _fabAnimationController,
-            bottomSheetController: _bottomSheetAnimationController,
-          ),
-          const TripsScreen(),
-          const SettingsScreen(),
-        ],
+        children: _screens,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
-        onDestinationSelected: _onItemTapped,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.map_outlined),
@@ -234,8 +181,8 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             label: 'Map',
           ),
           NavigationDestination(
-            icon: Icon(Icons.directions_car_outlined),
-            selectedIcon: Icon(Icons.directions_car),
+            icon: Icon(Icons.route_outlined),
+            selectedIcon: Icon(Icons.route),
             label: 'Trips',
           ),
           NavigationDestination(
@@ -244,7 +191,6 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
             label: 'Settings',
           ),
         ],
-        animationDuration: const Duration(milliseconds: 400),
       ),
     );
   }

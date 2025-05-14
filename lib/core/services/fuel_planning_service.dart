@@ -1,278 +1,209 @@
-import 'dart:convert';
-import 'dart:math';
-import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../models/route.dart' as route_model;
 import '../models/fuel_stop.dart';
-import '../models/stop.dart';
 import '../models/place.dart';
+import '../models/stop.dart';
+import '../models/user_route.dart';
+import '../models/vehicle_profile.dart';
 import 'places_service.dart';
 
 class FuelPlanningService {
-  final PlacesService placesService;
-  static const String _gasPriceApiUrl =
-      'https://api.gasbuddy.com/v1/prices'; // Example
+  final PlacesService _placesService;
 
-  FuelPlanningService({required this.placesService});
+  FuelPlanningService({required PlacesService placesService})
+      : _placesService = placesService;
 
-  // Plan fuel stops based on vehicle and route
-  Future<List<FuelStop>> planFuelStops({
-    required route_model.Route route,
-    required Vehicle vehicle,
-    required double currentFuelLevel, // percentage
+  Future<List<FuelStop>> calculateFuelStops({
+    required UserRoute route,
+    required VehicleProfile vehicleProfile,
   }) async {
-    final suggestions = <FuelStop>[];
-
-    // Calculate fuel consumption
-    final totalMiles = route.totalDistance;
-    final mpg = vehicle.mpg;
-    final tankSize = vehicle.tankSize;
-
-    // Current fuel in gallons
-    double currentFuel = tankSize * (currentFuelLevel / 100);
-    double milesDriven = 0;
-
-    // Never go below 1/4 tank (25%)
-    const double minFuelLevel = 0.25;
-    final minFuelGallons = tankSize * minFuelLevel;
-
-    // Check fuel level at various points along route
-    for (final stop in route.stops) {
-      // Calculate fuel consumed to reach this stop
-      if (milesDriven > 0) {
-        final fuelConsumed = milesDriven / mpg;
-        currentFuel -= fuelConsumed;
-
-        // Need fuel if we'll go below minimum
-        final milesRemaining = route.totalDistance - milesDriven;
-        final fuelNeededForRest = milesRemaining / mpg;
-
-        if (currentFuel - fuelNeededForRest < minFuelGallons ||
-            currentFuel < minFuelGallons * 1.5) {
-          // Find gas stations near this location
-          final fuelStops = await _findNearbyGasStations(
-            stop.location,
-            vehicle.preferredBrands,
-            vehicle.requiresDiesel,
-          );
-
-          if (fuelStops.isNotEmpty) {
-            suggestions.add(fuelStops.first);
-            currentFuel = tankSize * 0.9; // Assume 90% fill
-          }
-        }
-      }
-
-      // Calculate distance to next stop
-      final nextStopIndex = route.stops.indexOf(stop) + 1;
-      if (nextStopIndex < route.stops.length) {
-        final nextStop = route.stops[nextStopIndex];
-        milesDriven += _calculateDistance(stop.location, nextStop.location);
-      }
-    }
-
-    return suggestions;
-  }
-
-  // Find cheapest gas along route
-  Future<List<FuelStop>> findCheapestGas({
-    required route_model.Route route,
-    required Vehicle vehicle,
-    int maxDetourMinutes = 10,
-  }) async {
-    final gasStations = <FuelStop>[];
-
-    // Sample points along route (every 50 miles)
-    const sampleInterval = 50.0;
-    final numSamples = (route.totalDistance / sampleInterval).ceil();
-
-    for (int i = 0; i <= numSamples; i++) {
-      final progress = i / numSamples;
-      final sampleTime = route.departureTime.add(
-        Duration(seconds: (route.totalDuration.inSeconds * progress).round()),
-      );
-
-      final location = route.getLocationAtTime(sampleTime);
-      if (location == null) continue;
-
-      final nearbyStations = await _findNearbyGasStations(
-        location,
-        vehicle.preferredBrands,
-        vehicle.requiresDiesel,
-      );
-
-      gasStations.addAll(nearbyStations);
-    }
-
-    // Sort by price
-    gasStations.sort((a, b) => a.pricePerGallon.compareTo(b.pricePerGallon));
-
-    // Return top 5 cheapest
-    return gasStations.take(5).toList();
-  }
-
-  // Find gas stations near a location
-  Future<List<FuelStop>> _findNearbyGasStations(
-    LatLng location,
-    List<FuelBrand> preferredBrands,
-    bool requiresDiesel,
-  ) async {
-    // Search for gas stations
-    final places = await placesService.searchNearby(
-      location: location,
-      radius: 16000, // 10 miles
-      types: [PlaceType.gasStation],
-    );
-
     final fuelStops = <FuelStop>[];
 
-    for (final place in places) {
-      // Parse brand from name
-      final brand = _parseBrand(place.name);
+    // Calculate total distance needed
+    final totalDistance = route.totalDistance;
+    final rangePerTank = _calculateRange(vehicleProfile);
 
-      // Skip if not preferred brand
-      if (preferredBrands.isNotEmpty &&
-          preferredBrands.contains(FuelBrand.any) == false &&
-          !preferredBrands.contains(brand)) {
-        continue;
+    // Never let user go below 1/4 tank
+    final safeRange = rangePerTank * 0.75;
+
+    // Calculate number of fuel stops needed
+    final numStops = (totalDistance / safeRange).ceil();
+
+    if (numStops <= 0) return fuelStops;
+
+    // Divide route into segments
+    final segmentDistance = totalDistance / (numStops + 1);
+    double currentDistance = 0;
+
+    for (int i = 0; i < numStops; i++) {
+      currentDistance += segmentDistance;
+
+      // Find point on route at this distance
+      final pointOnRoute = _getPointAtDistance(
+        route.polylinePoints,
+        currentDistance,
+        totalDistance,
+      );
+
+      if (pointOnRoute != null) {
+        // Search for gas stations near this point
+        final nearbyStations = await _placesService.searchAlongRoute(
+          routePoints: route.polylinePoints,
+          type: PlaceType.gasStation,
+          maxDetourMeters: 5000,
+        );
+
+        // Filter by preferred brands if any
+        final filteredStations = _filterByPreferences(
+          nearbyStations,
+          vehicleProfile.preferredGasStations ?? [],
+        );
+
+        // Find best station (closest to route)
+        if (filteredStations.isNotEmpty) {
+          final bestStation = filteredStations.reduce((a, b) =>
+              (a.distanceFromRoute ?? double.infinity) <
+                      (b.distanceFromRoute ?? double.infinity)
+                  ? a
+                  : b);
+
+          fuelStops.add(FuelStop(
+            name: bestStation.name,
+            location: bestStation.location,
+            placeId: bestStation.placeId,
+            gallonsNeeded: vehicleProfile.tankSize * 0.75,
+            order: route.stops.length + i,
+          ));
+        }
       }
-
-      // Get current gas price (mock for now)
-      final price = await _getGasPrice(place.id, requiresDiesel);
-
-      // Check amenities
-      final amenities = _parseAmenities(place);
-
-      fuelStops.add(FuelStop(
-        id: place.id,
-        location: place.location,
-        name: place.name,
-        order: 0, // Will be set later
-        brand: brand,
-        pricePerGallon: price,
-        amenities: amenities,
-        detour: Duration.zero, // Calculate if needed
-        hasDiesel: true, // Most stations have diesel
-        priceUpdated: DateTime.now(),
-      ));
     }
 
     return fuelStops;
   }
 
-  FuelBrand _parseBrand(String name) {
-    final lowercaseName = name.toLowerCase();
-
-    if (lowercaseName.contains('shell')) return FuelBrand.shell;
-    if (lowercaseName.contains('chevron')) return FuelBrand.chevron;
-    if (lowercaseName.contains('exxon')) return FuelBrand.exxon;
-    if (lowercaseName.contains('bp')) return FuelBrand.bp;
-    if (lowercaseName.contains('mobil')) return FuelBrand.mobil;
-    if (lowercaseName.contains('speedway')) return FuelBrand.speedway;
-    if (lowercaseName.contains('wawa')) return FuelBrand.wawa;
-    if (lowercaseName.contains('sheetz')) return FuelBrand.sheetz;
-    if (lowercaseName.contains('costco')) return FuelBrand.costco;
-    if (lowercaseName.contains('sam')) return FuelBrand.sams;
-
-    return FuelBrand.any;
+  double _calculateRange(VehicleProfile profile) {
+    return profile.tankSize * profile.mpg;
   }
 
-  List<String> _parseAmenities(Place place) {
-    final amenities = <String>[];
+  LatLng? _getPointAtDistance(
+    List<LatLng> points,
+    double targetDistance,
+    double totalDistance,
+  ) {
+    if (points.isEmpty) return null;
 
-    // Common gas station amenities
-    final possibleAmenities = [
-      'restroom',
-      'convenience store',
-      'atm',
-      'air pump',
-      'car wash',
-      'restaurant',
-    ];
+    double currentDistance = 0;
 
-    // Check place amenities list
-    amenities.addAll(place.amenities);
+    for (int i = 0; i < points.length - 1; i++) {
+      final segmentDistance = _calculateDistance(points[i], points[i + 1]);
 
-    // Default amenities most gas stations have
-    if (amenities.isEmpty) {
-      amenities.addAll(['restroom', 'convenience store']);
+      if (currentDistance + segmentDistance >= targetDistance) {
+        // Interpolate position on this segment
+        final ratio = (targetDistance - currentDistance) / segmentDistance;
+
+        return LatLng(
+          points[i].latitude +
+              (points[i + 1].latitude - points[i].latitude) * ratio,
+          points[i].longitude +
+              (points[i + 1].longitude - points[i].longitude) * ratio,
+        );
+      }
+
+      currentDistance += segmentDistance;
+    }
+
+    return points.last;
+  }
+
+  double _calculateDistance(LatLng p1, LatLng p2) {
+    const double earthRadius = 6371000; // meters
+    final double lat1Rad = p1.latitude * (3.141592653589793 / 180);
+    final double lat2Rad = p2.latitude * (3.141592653589793 / 180);
+    final double deltaLat =
+        (p2.latitude - p1.latitude) * (3.141592653589793 / 180);
+    final double deltaLng =
+        (p2.longitude - p1.longitude) * (3.141592653589793 / 180);
+
+    final double a = (deltaLat / 2).sin() * (deltaLat / 2).sin() +
+        lat1Rad.cos() *
+            lat2Rad.cos() *
+            (deltaLng / 2).sin() *
+            (deltaLng / 2).sin();
+
+    final double c = 2 * a.sqrt().asin();
+
+    return earthRadius * c / 1609.344; // Convert to miles
+  }
+
+  List<Place> _filterByPreferences(
+    List<Place> stations,
+    List<String> preferredBrands,
+  ) {
+    if (preferredBrands.isEmpty) return stations;
+
+    // First try to find preferred brands
+    final preferredStations = stations.where((station) {
+      final name = station.name.toLowerCase();
+      return preferredBrands.any((brand) => name.contains(brand.toLowerCase()));
+    }).toList();
+
+    // If found, return only preferred; otherwise return all
+    return preferredStations.isNotEmpty ? preferredStations : stations;
+  }
+
+  Future<List<PossibleAmenity>> suggestAmenities({
+    required List<Stop> stops,
+    required VehicleProfile vehicleProfile,
+  }) async {
+    final amenities = <PossibleAmenity>[];
+
+    // For each fuel stop, suggest nearby amenities
+    for (final stop in stops) {
+      if (stop is FuelStop) {
+        // Search for convenience stores, restaurants nearby
+        final nearbyPlaces = await _placesService.searchPlaces(
+          query: 'convenience store restaurant',
+          location: stop.location,
+          radiusMeters: 1000,
+        );
+
+        for (final place in nearbyPlaces) {
+          amenities.add(PossibleAmenity(
+            name: place.name,
+            location: place.location,
+            type: _getAmenityType(place.type),
+            associatedStopId: stop.id,
+          ));
+        }
+      }
     }
 
     return amenities;
   }
 
-  Future<double> _getGasPrice(String placeId, bool diesel) async {
-    // In production, this would call a gas price API
-    // For now, return mock prices based on random variation
-    final basePrice = diesel ? 3.80 : 3.20;
-    final variation = Random().nextDouble() * 0.60 - 0.30; // +/- $0.30
-    return basePrice + variation;
+  AmenityType _getAmenityType(PlaceType placeType) {
+    switch (placeType) {
+      case PlaceType.restaurant:
+        return AmenityType.food;
+      case PlaceType.convenienceStore:
+        return AmenityType.restroom;
+      default:
+        return AmenityType.rest;
+    }
   }
-
-  double _calculateDistance(LatLng from, LatLng to) {
-    // Haversine formula for distance
-    const double earthRadius = 3959; // miles
-    final double dLat = _toRadians(to.latitude - from.latitude);
-    final double dLon = _toRadians(to.longitude - from.longitude);
-
-    final double a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(_toRadians(from.latitude)) *
-            cos(_toRadians(to.latitude)) *
-            sin(dLon / 2) *
-            sin(dLon / 2);
-
-    final double c = 2 * atan2(sqrt(a), sqrt(1 - a));
-
-    return earthRadius * c;
-  }
-
-  double _toRadians(double degree) => degree * pi / 180;
 }
 
-class Vehicle {
-  final String id;
+class PossibleAmenity {
   final String name;
-  final VehicleType type;
-  final double tankSize; // gallons
-  final double mpg;
-  final double currentFuelLevel; // percentage
-  final List<FuelBrand> preferredBrands;
-  final bool requiresDiesel;
+  final LatLng location;
+  final AmenityType type;
+  final String associatedStopId;
 
-  Vehicle({
-    required this.id,
+  PossibleAmenity({
     required this.name,
+    required this.location,
     required this.type,
-    required this.tankSize,
-    required this.mpg,
-    required this.currentFuelLevel,
-    this.preferredBrands = const [],
-    this.requiresDiesel = false,
+    required this.associatedStopId,
   });
-
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'name': name,
-        'type': type.toString(),
-        'tankSize': tankSize,
-        'mpg': mpg,
-        'currentFuelLevel': currentFuelLevel,
-        'preferredBrands': preferredBrands.map((b) => b.toString()).toList(),
-        'requiresDiesel': requiresDiesel,
-      };
-
-  factory Vehicle.fromMap(Map<String, dynamic> map) => Vehicle(
-        id: map['id'],
-        name: map['name'],
-        type: VehicleType.values.firstWhere((t) => t.toString() == map['type']),
-        tankSize: map['tankSize'],
-        mpg: map['mpg'],
-        currentFuelLevel: map['currentFuelLevel'],
-        preferredBrands: (map['preferredBrands'] as List)
-            .map((b) => FuelBrand.values.firstWhere((fb) => fb.toString() == b))
-            .toList(),
-        requiresDiesel: map['requiresDiesel'],
-      );
 }
 
-enum VehicleType { car, suv, truck, van, rv, motorcycle }
+enum AmenityType { restroom, food, rest }

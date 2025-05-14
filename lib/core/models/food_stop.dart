@@ -1,131 +1,69 @@
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'stop.dart';
 import 'place.dart';
+import 'stop.dart';
+import 'time_window.dart';
+
+enum MealType { breakfast, lunch, dinner }
 
 class FoodStop extends Stop {
   final MealType mealType;
-  final List<FoodPreference> preferences;
-  final Duration maxDetour;
-  final Place? selectedRestaurant;
-  final List<FoodSuggestion>? suggestions;
+  final String? cuisineType;
+  final double? rating;
+  final PriceLevel? priceLevel;
+  final String? placeId;
 
   FoodStop({
-    required String id,
-    required LatLng location,
-    required String name,
-    required int order,
+    super.id,
+    required super.name,
+    required super.location,
+    required super.order,
+    super.estimatedDuration = const Duration(minutes: 45),
+    super.timeWindow,
+    super.notes,
     required this.mealType,
-    required this.preferences,
-    this.maxDetour = const Duration(minutes: 10),
-    this.selectedRestaurant,
-    this.suggestions,
-    Duration? estimatedDuration,
-    TimeWindow? timeWindow,
-    String? notes,
-  }) : super(
-          id: id,
-          location: location,
-          name: name,
-          type: StopType.food,
-          order: order,
-          estimatedDuration: estimatedDuration ?? const Duration(minutes: 45),
-          timeWindow: timeWindow,
-          notes: notes,
-        );
-
-  @override
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'location': {
-          'lat': location.latitude,
-          'lng': location.longitude,
-        },
-        'name': name,
-        'type': type.toString(),
-        'order': order,
-        'estimatedDuration': estimatedDuration?.inSeconds,
-        'timeWindow': timeWindow?.toMap(),
-        'notes': notes,
-        'mealType': mealType.toString(),
-        'preferences': preferences.map((p) => p.toMap()).toList(),
-        'maxDetour': maxDetour.inSeconds,
-        'selectedRestaurant': selectedRestaurant?.toMap(),
-      };
-
-  @override
-  FoodStop copyWith({
-    int? order,
-    Duration? estimatedDuration,
-    TimeWindow? timeWindow,
-    String? notes,
-    Place? selectedRestaurant,
-    List<FoodSuggestion>? suggestions,
-  }) =>
-      FoodStop(
-        id: id,
-        location: selectedRestaurant?.location ?? location,
-        name: selectedRestaurant?.name ?? name,
-        order: order ?? this.order,
-        mealType: mealType,
-        preferences: preferences,
-        maxDetour: maxDetour,
-        selectedRestaurant: selectedRestaurant ?? this.selectedRestaurant,
-        suggestions: suggestions ?? this.suggestions,
-        estimatedDuration: estimatedDuration ?? this.estimatedDuration,
-        timeWindow: timeWindow ?? this.timeWindow,
-        notes: notes ?? this.notes,
-      );
-}
-
-class FoodPreference {
-  final String? category; // fast-food, sit-down, coffee
-  final List<String> chains; // ["McDonald's", "Chick-fil-A"]
-  final List<String> cuisines; // ["Mexican", "Italian"]
-  final PriceLevel? priceLevel;
-
-  FoodPreference({
-    this.category,
-    this.chains = const [],
-    this.cuisines = const [],
+    this.cuisineType,
+    this.rating,
     this.priceLevel,
+    required this.placeId,
   });
 
-  Map<String, dynamic> toMap() => {
-        'category': category,
-        'chains': chains,
-        'cuisines': cuisines,
-        'priceLevel': priceLevel?.toString(),
-      };
+  @override
+  Map<String, dynamic> toJson() {
+    final json = super.toJson();
+    json.addAll({
+      'mealType': mealType.toString().split('.').last,
+      'cuisineType': cuisineType,
+      'rating': rating,
+      'priceLevel': priceLevel?.toString().split('.').last,
+      'placeId': placeId,
+    });
+    return json;
+  }
 
-  factory FoodPreference.fromMap(Map<String, dynamic> map) => FoodPreference(
-        category: map['category'],
-        chains: List<String>.from(map['chains'] ?? []),
-        cuisines: List<String>.from(map['cuisines'] ?? []),
-        priceLevel: map['priceLevel'] != null
-            ? PriceLevel.values
-                .firstWhere((e) => e.toString() == map['priceLevel'])
-            : null,
-      );
+  factory FoodStop.fromJson(Map<String, dynamic> json) {
+    return FoodStop(
+      id: json['id'],
+      name: json['name'],
+      location: LatLng(json['latitude'], json['longitude']),
+      order: json['order'],
+      estimatedDuration: json['estimatedDuration'] != null
+          ? Duration(minutes: json['estimatedDuration'])
+          : const Duration(minutes: 45),
+      timeWindow: json['timeWindow'] != null
+          ? TimeWindow.fromJson(json['timeWindow'])
+          : null,
+      notes: json['notes'],
+      mealType: MealType.values.firstWhere(
+        (t) => t.toString().split('.').last == json['mealType'],
+      ),
+      cuisineType: json['cuisineType'],
+      rating: json['rating']?.toDouble(),
+      priceLevel: json['priceLevel'] != null
+          ? PriceLevel.values.firstWhere(
+              (p) => p.toString().split('.').last == json['priceLevel'],
+            )
+          : null,
+      placeId: json['placeId'],
+    );
+  }
 }
-
-class FoodSuggestion {
-  final Place restaurant;
-  final Duration detour;
-  final double rating;
-  final bool currentlyOpen;
-  final PriceLevel priceLevel;
-  final List<String> popularItems;
-  final double distance; // miles
-
-  FoodSuggestion({
-    required this.restaurant,
-    required this.detour,
-    required this.rating,
-    required this.currentlyOpen,
-    required this.priceLevel,
-    required this.popularItems,
-    required this.distance,
-  });
-}
-
-enum PriceLevel { free, cheap, moderate, expensive, veryExpensive }

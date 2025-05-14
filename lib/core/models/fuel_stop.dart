@@ -1,82 +1,48 @@
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'stop.dart';
+import 'time_window.dart';
 
 class FuelStop extends Stop {
-  final FuelBrand brand;
-  final double pricePerGallon;
-  final List<String> amenities; // restroom, food, atm
-  final Duration detour;
-  final bool hasDiesel;
-  final DateTime? priceUpdated;
+  final double gallonsNeeded;
+  final String? placeId;
 
   FuelStop({
-    required String id,
-    required LatLng location,
-    required String name,
-    required int order,
-    required this.brand,
-    required this.pricePerGallon,
-    this.amenities = const [],
-    this.detour = Duration.zero,
-    this.hasDiesel = false,
-    this.priceUpdated,
-    Duration? estimatedDuration,
-    TimeWindow? timeWindow,
-    String? notes,
-  }) : super(
-          id: id,
-          location: location,
-          name: name,
-          type: StopType.fuel,
-          order: order,
-          estimatedDuration: estimatedDuration ?? const Duration(minutes: 10),
-          timeWindow: timeWindow,
-          notes: notes,
-        );
+    super.id,
+    required super.name,
+    required super.location,
+    required super.order,
+    super.estimatedDuration = const Duration(minutes: 15),
+    super.timeWindow,
+    super.notes,
+    required this.gallonsNeeded,
+    required this.placeId,
+  });
 
   @override
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'location': {
-          'lat': location.latitude,
-          'lng': location.longitude,
-        },
-        'name': name,
-        'type': type.toString(),
-        'order': order,
-        'estimatedDuration': estimatedDuration?.inSeconds,
-        'timeWindow': timeWindow?.toMap(),
-        'notes': notes,
-        'brand': brand.toString(),
-        'pricePerGallon': pricePerGallon,
-        'amenities': amenities,
-        'detour': detour.inSeconds,
-        'hasDiesel': hasDiesel,
-        'priceUpdated': priceUpdated?.toIso8601String(),
-      };
+  Map<String, dynamic> toJson() {
+    final json = super.toJson();
+    json.addAll({
+      'gallonsNeeded': gallonsNeeded,
+      'placeId': placeId,
+    });
+    return json;
+  }
 
-  @override
-  FuelStop copyWith({
-    int? order,
-    Duration? estimatedDuration,
-    TimeWindow? timeWindow,
-    String? notes,
-    double? pricePerGallon,
-    DateTime? priceUpdated,
-  }) =>
-      FuelStop(
-        id: id,
-        location: location,
-        name: name,
-        order: order ?? this.order,
-        brand: brand,
-        pricePerGallon: pricePerGallon ?? this.pricePerGallon,
-        amenities: amenities,
-        detour: detour,
-        hasDiesel: hasDiesel,
-        priceUpdated: priceUpdated ?? this.priceUpdated,
-        estimatedDuration: estimatedDuration ?? this.estimatedDuration,
-        timeWindow: timeWindow ?? this.timeWindow,
-        notes: notes ?? this.notes,
-      );
+  factory FuelStop.fromJson(Map<String, dynamic> json) {
+    return FuelStop(
+      id: json['id'],
+      name: json['name'],
+      location: LatLng(json['latitude'], json['longitude']),
+      order: json['order'],
+      estimatedDuration: json['estimatedDuration'] != null
+          ? Duration(minutes: json['estimatedDuration'])
+          : const Duration(minutes: 15),
+      timeWindow: json['timeWindow'] != null
+          ? TimeWindow.fromJson(json['timeWindow'])
+          : null,
+      notes: json['notes'],
+      gallonsNeeded: json['gallonsNeeded'].toDouble(),
+      placeId: json['placeId'],
+    );
+  }
 }

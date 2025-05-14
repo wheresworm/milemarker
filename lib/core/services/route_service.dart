@@ -1,288 +1,231 @@
+import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../models/route.dart' as route_model;
+import '../models/favorite_route.dart';
 import '../models/stop.dart';
-import '../models/food_stop.dart';
-import '../models/fuel_stop.dart';
-import '../models/place_stop.dart';
-import '../models/place.dart';
-import '../models/directions.dart';
-import 'directions_service.dart';
-import 'places_service.dart';
-import 'food_stop_service.dart';
-import 'fuel_planning_service.dart';
-import 'route_optimization_service.dart';
-import 'database_service.dart';
+import '../models/trip.dart';
+import '../models/user_route.dart';
+import '../models/user_preferences.dart';
+import '../services/database_service.dart';
+import '../services/places_service.dart';
+import '../services/directions_service.dart';
+import '../services/food_stop_service.dart';
+import '../services/fuel_planning_service.dart';
 
-class RouteService {
-  final DirectionsService directionsService;
-  final PlacesService placesService;
-  final FoodStopService foodStopService;
-  final FuelPlanningService fuelPlanningService;
-  final RouteOptimizationService optimizationService;
-  final DatabaseService databaseService;
+class RouteService extends ChangeNotifier {
+  final DatabaseService _databaseService;
+  final PlacesService _placesService;
+  final DirectionsService _directionsService;
+  final FoodStopService _foodStopService;
+  final FuelPlanningService _fuelPlanningService;
+
+  List<UserRoute> _routes = [];
+  UserRoute? _currentRoute;
+  Trip? _activeTrip;
+  bool _isLoading = false;
+  String? _error;
+
+  List<UserRoute> get routes => _routes;
+  UserRoute? get currentRoute => _currentRoute;
+  Trip? get activeTrip => _activeTrip;
+  bool get isLoading => _isLoading;
+  String? get error => _error;
 
   RouteService({
-    required this.directionsService,
-    required this.placesService,
-    required this.foodStopService,
-    required this.fuelPlanningService,
-    required this.optimizationService,
-    required this.databaseService,
-  });
-
-  // Create a new route
-  Future<route_model.Route> createRoute({
-    required String name,
-    required LatLng origin,
-    required LatLng destination,
-    required DateTime departureTime,
-  }) async {
-    final routeId = 'route_${DateTime.now().millisecondsSinceEpoch}';
-
-    // Create initial stops
-    final originStop = PlaceStop(
-      id: 'origin_$routeId',
-      location: origin,
-      name: 'Start',
-      order: 0,
-      placeDetails: Place(
-        id: 'origin',
-        name: 'Starting Point',
-        location: origin,
-        address: '',
-        type: PlaceType.other,
-      ),
-    );
-
-    final destinationStop = PlaceStop(
-      id: 'destination_$routeId',
-      location: destination,
-      name: 'End',
-      order: 1,
-      placeDetails: Place(
-        id: 'destination',
-        name: 'Destination',
-        location: destination,
-        address: '',
-        type: PlaceType.other,
-      ),
-    );
-
-    // Get initial directions
-    final directions = await directionsService.getDirections(
-      origin: origin,
-      destination: destination,
-      departureTime: departureTime,
-    );
-
-    // Create route
-    final route = route_model.Route(
-      id: routeId,
-      name: name,
-      stops: [originStop, destinationStop],
-      departureTime: departureTime,
-      directions: directions,
-    );
-
-    // Calculate stats
-    final stats = await _calculateRouteStats(route);
-
-    return route.copyWith(stats: stats);
+    required DatabaseService databaseService,
+    required PlacesService placesService,
+    required DirectionsService directionsService,
+    required FoodStopService foodStopService,
+    required FuelPlanningService fuelPlanningService,
+  })  : _databaseService = databaseService,
+        _placesService = placesService,
+        _directionsService = directionsService,
+        _foodStopService = foodStopService,
+        _fuelPlanningService = fuelPlanningService {
+    loadRoutes();
   }
 
-  // Add a stop to route
-  Future<route_model.Route> addStop({
-    required route_model.Route route,
-    required Stop stop,
-    int? position,
+  Future<void> loadRoutes() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      _routes = await _databaseService.getRoutes();
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to load routes: $e';
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<UserRoute> createRoute({
+    required String name,
+    required List<Stop> stops,
+    DateTime? departureTime,
+    UserPreferences? preferences,
   }) async {
+    try {
+      // Calculate route details
+      final locationPoints = stops.map((s) => s.location).toList();
+      final directions = await _directionsService.getDirections(
+        waypoints: locationPoints,
+        departureTime: departureTime,
+      );
+
+      final route = UserRoute(
+        name: name,
+        stops: stops,
+        totalDistance: directions.totalDistance,
+        totalDuration: directions.totalDuration,
+        polylinePoints: directions.polylinePoints,
+        departureTime: departureTime,
+      );
+
+      // Save to database
+      await _databaseService.saveRoute(route);
+      await loadRoutes();
+
+      _currentRoute = route;
+      notifyListeners();
+
+      return route;
+    } catch (e) {
+      _error = 'Failed to create route: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> updateRoute(UserRoute route) async {
+    try {
+      await _databaseService.updateRoute(route);
+      await loadRoutes();
+
+      if (_currentRoute?.id == route.id) {
+        _currentRoute = route;
+      }
+
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to update route: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> deleteRoute(String routeId) async {
+    try {
+      await _databaseService.deleteRoute(routeId);
+      await loadRoutes();
+
+      if (_currentRoute?.id == routeId) {
+        _currentRoute = null;
+      }
+
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to delete route: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> setCurrentRoute(UserRoute? route) async {
+    _currentRoute = route;
+    notifyListeners();
+  }
+
+  Future<Trip> startTrip(UserRoute route) async {
+    try {
+      final trip = Trip(
+        routeId: route.id,
+        startTime: DateTime.now(),
+        status: TripStatus.active,
+      );
+
+      await _databaseService.saveTrip(trip);
+      _activeTrip = trip;
+      _currentRoute = route;
+      notifyListeners();
+
+      return trip;
+    } catch (e) {
+      _error = 'Failed to start trip: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<void> endTrip() async {
+    if (_activeTrip == null) return;
+
+    try {
+      final updatedTrip = Trip(
+        id: _activeTrip!.id,
+        routeId: _activeTrip!.routeId,
+        startTime: _activeTrip!.startTime,
+        endTime: DateTime.now(),
+        status: TripStatus.completed,
+      );
+
+      await _databaseService.updateTrip(updatedTrip);
+      _activeTrip = null;
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to end trip: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<List<Stop>> optimizeRoute(List<Stop> stops) async {
+    // Simple optimization - keep first and last stops fixed
+    if (stops.length <= 2) return stops;
+
+    final origin = stops.first;
+    final destination = stops.last;
+    final waypoints = stops.sublist(1, stops.length - 1);
+
+    // This is a placeholder for more sophisticated optimization
+    // In a real implementation, you might want to use the Google Directions API
+    // optimize waypoints feature or implement a traveling salesman algorithm
+
+    final optimizedStops = [origin, ...waypoints, destination];
+    return optimizedStops;
+  }
+
+  Future<List<Stop>> addSmartStops(
+    UserRoute route,
+    UserPreferences preferences,
+  ) async {
     final stops = List<Stop>.from(route.stops);
 
-    // Add stop at specified position or end
-    if (position != null && position < stops.length) {
-      stops.insert(position, stop);
-      // Update order indices
-      for (int i = 0; i < stops.length; i++) {
-        stops[i] = stops[i].copyWith(order: i);
-      }
-    } else {
-      stop = stop.copyWith(order: stops.length);
-      stops.add(stop);
-    }
-
-    // Rebuild route with new stop
-    return await _rebuildRoute(route.copyWith(stops: stops));
-  }
-
-  // Remove a stop from route
-  Future<route_model.Route> removeStop({
-    required route_model.Route route,
-    required String stopId,
-  }) async {
-    final stops = route.stops.where((s) => s.id != stopId).toList();
-
-    // Update order indices
-    for (int i = 0; i < stops.length; i++) {
-      stops[i] = stops[i].copyWith(order: i);
-    }
-
-    return await _rebuildRoute(route.copyWith(stops: stops));
-  }
-
-  // Reorder stops
-  Future<route_model.Route> reorderStops({
-    required route_model.Route route,
-    required List<Stop> newOrder,
-  }) async {
-    // Update order indices
-    for (int i = 0; i < newOrder.length; i++) {
-      newOrder[i] = newOrder[i].copyWith(order: i);
-    }
-
-    return await _rebuildRoute(route.copyWith(stops: newOrder));
-  }
-
-  // Add meal stops
-  Future<route_model.Route> addMealStops({
-    required route_model.Route route,
-    required Vehicle vehicle,
-  }) async {
-    // Suggest meal times
-    final mealStops = foodStopService.suggestMealTimes(route);
-
-    // Add them to route
-    var updatedRoute = route;
-    for (final mealStop in mealStops) {
-      updatedRoute = await addStop(
-        route: updatedRoute,
-        stop: mealStop,
+    // Add meal stops
+    if (preferences.mealPreferences != null) {
+      final mealStops = await _foodStopService.suggestMealStops(
+        route: route,
+        preferences: preferences.mealPreferences!,
       );
+      stops.addAll(mealStops);
     }
 
-    return updatedRoute;
-  }
-
-  // Add fuel stops
-  Future<route_model.Route> addFuelStops({
-    required route_model.Route route,
-    required Vehicle vehicle,
-    required double currentFuelLevel,
-  }) async {
-    final fuelStops = await fuelPlanningService.planFuelStops(
-      route: route,
-      vehicle: vehicle,
-      currentFuelLevel: currentFuelLevel,
-    );
-
-    // Add them to route
-    var updatedRoute = route;
-    for (final fuelStop in fuelStops) {
-      updatedRoute = await addStop(
-        route: updatedRoute,
-        stop: fuelStop,
+    // Add fuel stops
+    if (preferences.vehicleProfile != null) {
+      final fuelStops = await _fuelPlanningService.calculateFuelStops(
+        route: route,
+        vehicleProfile: preferences.vehicleProfile!,
       );
+      stops.addAll(fuelStops);
     }
 
-    return updatedRoute;
+    // Re-optimize the route with the new stops
+    return optimizeRoute(stops);
   }
 
-  // Find food options for a meal stop
-  Future<route_model.Route> findFoodOptions({
-    required route_model.Route route,
-    required FoodStop mealStop,
-  }) async {
-    final suggestions = await foodStopService.findMealOptions(
-      route: route,
-      mealStop: mealStop,
-      tripDate: route.departureTime,
-    );
-
-    // Update the meal stop with suggestions
-    final updatedStop = mealStop.copyWith(suggestions: suggestions);
-    final stops = route.stops.map((s) {
-      return s.id == mealStop.id ? updatedStop : s;
-    }).toList();
-
-    return route.copyWith(stops: stops);
-  }
-
-  // Optimize route
-  Future<route_model.Route> optimizeRoute({
-    required route_model.Route route,
-    required OptimizationPreferences preferences,
-  }) async {
-    return await optimizationService.optimizeRoute(
-      route: route,
-      preferences: preferences,
-    );
-  }
-
-  // Save route
-  Future<void> saveRoute(route_model.Route route) async {
-    await databaseService.saveRoute(route);
-  }
-
-  // Load route
-  Future<route_model.Route?> loadRoute(String routeId) async {
-    return await databaseService.getRoute(routeId);
-  }
-
-  // Get saved routes
-  Future<List<route_model.Route>> getSavedRoutes() async {
-    return await databaseService.getAllRoutes();
-  }
-
-  // Private helper methods
-  Future<route_model.Route> _rebuildRoute(route_model.Route route) async {
-    // Skip if only origin and destination
-    if (route.stops.length <= 2) {
-      return route;
-    }
-
-    // Get new directions
-    final directions = await directionsService.getDirections(
-      origin: route.origin,
-      destination: route.destination,
-      waypoints: route.waypoints,
-      departureTime: route.departureTime,
-    );
-
-    // Calculate stats
-    final updatedRoute = route.copyWith(directions: directions);
-    final stats = await _calculateRouteStats(updatedRoute);
-
-    return updatedRoute.copyWith(stats: stats);
-  }
-
-  Future<route_model.RouteStats> _calculateRouteStats(
-      route_model.Route route) async {
-    // Count stop types
-    final mealStops = <MealType, int>{};
-    int fuelStops = 0;
-
-    for (final stop in route.stops) {
-      if (stop is FoodStop) {
-        mealStops[stop.mealType] = (mealStops[stop.mealType] ?? 0) + 1;
-      } else if (stop is FuelStop) {
-        fuelStops++;
-      }
-    }
-
-    // Estimate costs
-    const averageMpg = 25.0;
-    const averageGasPrice = 3.50;
-    final fuelCost = (route.totalDistance / averageMpg) * averageGasPrice;
-    final tolls = route.totalDistance * 0.02; // Rough estimate
-
-    return route_model.RouteStats(
-      totalDuration: route.directions?.totalDuration ?? Duration.zero,
-      totalDistance: route.directions?.totalDistance ?? 0.0,
-      estimatedFuelCost: fuelCost,
-      estimatedTolls: tolls,
-      numberOfStops: route.stops.length,
-      mealStops: mealStops,
-      fuelStops: fuelStops,
-      statesTraversed: [], // Would calculate from directions
-    );
+  void clearError() {
+    _error = null;
+    notifyListeners();
   }
 }
