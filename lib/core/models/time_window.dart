@@ -17,6 +17,8 @@ class TimeWindow {
         'latest': latest?.toIso8601String(),
       };
 
+  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+
   factory TimeWindow.fromJson(Map<String, dynamic> json) {
     return TimeWindow(
       earliest:

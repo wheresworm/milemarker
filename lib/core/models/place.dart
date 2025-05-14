@@ -113,6 +113,8 @@ class Place {
         'website': website,
       };
 
+  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+
   factory Place.fromJson(Map<String, dynamic> json) {
     return Place(
       id: json['id'],

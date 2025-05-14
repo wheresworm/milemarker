@@ -18,9 +18,13 @@ class DirectionsService {
     }
 
     // If waypoints are provided but no origin/destination, use first and last
-    final actualOrigin = origin ?? (waypoints?.first ?? throw ArgumentError('Origin required'));
-    final actualDestination = destination ?? (waypoints?.last ?? throw ArgumentError('Destination required'));
-    
+    final actualOrigin = origin ?? (waypoints?.first);
+    final actualDestination = destination ?? (waypoints?.last);
+
+    if (actualOrigin == null || actualDestination == null) {
+      throw ArgumentError('Origin and destination are required');
+    }
+
     // Extract intermediate waypoints
     List<LatLng> intermediateWaypoints = [];
     if (waypoints != null && waypoints.length > 2) {
@@ -53,7 +57,7 @@ class DirectionsService {
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      
+
       if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
         return Directions.fromJson(data['routes'][0]);
       } else {
@@ -92,7 +96,7 @@ class Directions {
     for (final leg in legs) {
       totalDistanceMeters += leg['distance']['value'];
       totalDurationSeconds += leg['duration']['value'];
-      
+
       final steps = leg['steps'] as List;
       allSteps.addAll(steps.map((s) => DirectionStep.fromJson(s)));
     }
@@ -117,25 +121,25 @@ class Directions {
       int shift = 0;
       int result = 0;
       int byte;
-      
+
       do {
         byte = encoded.codeUnitAt(index++) - 63;
         result |= (byte & 0x1F) << shift;
         shift += 5;
       } while (byte >= 0x20);
-      
+
       int deltaLat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lat += deltaLat;
 
       shift = 0;
       result = 0;
-      
+
       do {
         byte = encoded.codeUnitAt(index++) - 63;
         result |= (byte & 0x1F) << shift;
         shift += 5;
       } while (byte >= 0x20);
-      
+
       int deltaLng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
       lng += deltaLng;
 
@@ -166,7 +170,7 @@ class DirectionStep {
   factory DirectionStep.fromJson(Map<String, dynamic> json) {
     final start = json['start_location'];
     final end = json['end_location'];
-    
+
     return DirectionStep(
       startLocation: LatLng(start['lat'], start['lng']),
       endLocation: LatLng(end['lat'], end['lng']),

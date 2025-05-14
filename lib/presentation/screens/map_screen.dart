@@ -1,241 +1,204 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:provider/provider.dart';
+import '../../core/models/stop.dart';
 import '../../core/models/trip.dart';
-import '../../core/services/location_service.dart';
-import '../../core/utils/constants.dart';
-import '../../core/utils/formatters.dart';
-import '../widgets/animated_tracking_button.dart';
+import '../controllers/places_controller.dart';
+import '../controllers/route_controller.dart';
+import '../widgets/place_search_bar.dart';
+import '../widgets/route_map.dart';
+import '../widgets/stop_list.dart';
 import '../widgets/trip_bottom_sheet.dart';
-import '../widgets/speed_display_overlay.dart';
 
 class MapScreen extends StatefulWidget {
-  final bool isTracking;
-  final Trip? currentTrip;
-  final LatLng? currentLocation;
-  final VoidCallback onToggleTracking;
-  final VoidCallback onPlanRoute;
-  final AnimationController fabAnimationController;
-  final AnimationController bottomSheetController;
-
-  const MapScreen({
-    super.key,
-    required this.isTracking,
-    required this.currentTrip,
-    required this.currentLocation,
-    required this.onToggleTracking,
-    required this.onPlanRoute,
-    required this.fabAnimationController,
-    required this.bottomSheetController,
-  });
+  const MapScreen({super.key});
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
-  GoogleMapController? _mapController;
-  Set<Polyline> _polylines = {};
-  Set<Marker> _markers = {};
+  late AnimationController _bottomSheetController;
+  late AnimationController _fabAnimationController;
+  late GoogleMapController _mapController;
 
-  final LatLng _defaultLocation = const LatLng(37.7749, -122.4194);
-  double _currentZoom = 15.0;
-
-  late AnimationController _mapLoadingController;
-  late Animation<double> _fadeAnimation;
+  bool _isSearching = false;
+  bool _isTracking = false;
+  LatLng? _currentLocation;
+  Trip? _currentTrip;
 
   @override
   void initState() {
     super.initState();
-    _mapLoadingController = AnimationController(
-      duration: const Duration(milliseconds: 800),
+    _bottomSheetController = AnimationController(
       vsync: this,
+      duration: const Duration(milliseconds: 300),
     );
-    _fadeAnimation = CurvedAnimation(
-      parent: _mapLoadingController,
-      curve: Curves.easeInOut,
+    _fabAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
     );
-    _mapLoadingController.forward();
-  }
 
-  @override
-  void didUpdateWidget(MapScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    if (widget.currentTrip != null &&
-        widget.currentTrip != oldWidget.currentTrip) {
-      _updateRoute();
-    }
-
-    if (widget.currentLocation != oldWidget.currentLocation) {
-      _updateCurrentLocationMarker();
-      if (widget.isTracking) {
-        _animateCameraToLocation(widget.currentLocation!);
-      }
-    }
-  }
-
-  void _updateRoute() {
-    if (widget.currentTrip == null) return;
-
-    final List<LatLng> points =
-        widget.currentTrip!.route.map((point) => point.toLatLng()).toList();
-
-    setState(() {
-      _polylines = {
-        Polyline(
-          polylineId: const PolylineId('trip_route'),
-          points: points,
-          color: AppColors.primary,
-          width: 5,
-          patterns: [],
-          geodesic: true,
-        ),
-      };
-    });
-  }
-
-  void _updateCurrentLocationMarker() {
-    if (widget.currentLocation == null) return;
-
-    setState(() {
-      _markers = {
-        Marker(
-          markerId: const MarkerId('current_location'),
-          position: widget.currentLocation!,
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          anchor: const Offset(0.5, 0.5),
-        ),
-      };
-    });
-  }
-
-  void _animateCameraToLocation(LatLng location) {
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(location, _currentZoom),
-    );
-  }
-
-  void _onMapCreated(GoogleMapController controller) {
-    _mapController = controller;
-    _setMapStyle();
-
-    if (widget.currentLocation != null) {
-      _animateCameraToLocation(widget.currentLocation!);
-    }
-  }
-
-  void _setMapStyle() async {
-    final String style = await rootBundle.loadString('assets/map_style.json');
-    _mapController?.setMapStyle(style);
+    _loadCurrentLocation();
   }
 
   @override
   void dispose() {
-    _mapLoadingController.dispose();
+    _bottomSheetController.dispose();
+    _fabAnimationController.dispose();
+    _mapController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadCurrentLocation() async {
+    // This would normally get the user's current location
+    // For now, we'll use a default location
+    setState(() {
+      _currentLocation = const LatLng(37.7749, -122.4194); // San Francisco
+    });
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+    });
+  }
+
+  void _toggleTracking() {
+    setState(() {
+      _isTracking = !_isTracking;
+    });
+  }
+
+  void _planRoute() {
+    Navigator.pushNamed(context, '/route-builder');
+  }
+
+  void _onPlaceSelected(SearchResult result) {
+    final routeController = context.read<RouteController>();
+    final stop = Stop(
+      name: result.name,
+      location: result.location,
+      order: routeController.stops.length,
+    );
+    routeController.addStop(stop);
+    setState(() {
+      _isSearching = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final routeController = context.watch<RouteController>();
     final theme = Theme.of(context);
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       body: Stack(
         children: [
           // Map
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: widget.currentLocation ?? _defaultLocation,
-                zoom: _currentZoom,
-              ),
-              onMapCreated: _onMapCreated,
-              myLocationEnabled: false,
-              myLocationButtonEnabled: false,
-              zoomControlsEnabled: false,
-              compassEnabled: false,
-              mapToolbarEnabled: false,
-              polylines: _polylines,
-              markers: _markers,
-              onCameraMove: (position) {
-                _currentZoom = position.zoom;
-              },
-              mapType: MapType.normal,
-              padding: EdgeInsets.only(bottom: bottomPadding + 80),
-            ),
-          ),
-
-          // Speed/Stats Overlay
-          if (widget.isTracking && widget.currentTrip != null)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              left: 16,
-              right: 16,
-              child: SpeedDisplayOverlay(
-                speed: widget.currentTrip!.averageSpeed,
-                distance: widget.currentTrip!.distance,
-                duration: widget.currentTrip!.duration,
-              ),
-            ),
-
-          // Tracking FAB
-          Positioned(
-            bottom: bottomPadding + 100,
-            right: 16,
-            child: AnimatedTrackingButton(
-              isTracking: widget.isTracking,
-              onPressed: widget.onToggleTracking,
-              animationController: widget.fabAnimationController,
-            ),
-          ),
-
-          // Plan Route FAB
-          Positioned(
-            bottom: bottomPadding + 180,
-            right: 16,
-            child: FloatingActionButton(
-              onPressed: widget.onPlanRoute,
-              backgroundColor: Colors.green,
-              child: const Icon(Icons.add_location),
-              heroTag: 'plan_route',
-            ),
-          ),
-
-          // Center on location button
-          Positioned(
-            bottom: bottomPadding + 260,
-            right: 16,
-            child: FloatingActionButton.small(
-              onPressed: () {
-                if (widget.currentLocation != null) {
-                  _animateCameraToLocation(widget.currentLocation!);
-                }
-              },
-              backgroundColor: Colors.white,
-              child: Icon(
-                Icons.my_location,
-                color: theme.colorScheme.primary,
-              ),
-              heroTag: 'my_location',
-            ),
-          ),
-
-          // Trip Bottom Sheet
-          TripBottomSheet(
-            isTracking: widget.isTracking,
-            currentTrip: widget.currentTrip,
-            animationController: widget.bottomSheetController,
-            onExpand: () {
-              // Handle expansion
+          RouteMap(
+            markers: routeController.stops
+                .map((stop) => Marker(
+                      markerId: MarkerId(stop.id),
+                      position: stop.location,
+                      infoWindow: InfoWindow(title: stop.name),
+                    ))
+                .toSet(),
+            polylines: routeController.polylines,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              _loadMapStyle();
             },
+            initialPosition:
+                _currentLocation ?? const LatLng(37.7749, -122.4194),
+          ),
+
+          // Search Bar
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            top: MediaQuery.of(context).padding.top + 16,
+            left: 16,
+            right: 16,
+            child: _isSearching
+                ? PlaceSearchBar(
+                    onPlaceSelected: _onPlaceSelected,
+                    onClose: _toggleSearch,
+                  )
+                : Container(),
+          ),
+
+          // Bottom Sheet
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 300),
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: TripBottomSheet(
+              controller: _bottomSheetController,
+              trip: routeController.currentRoute != null
+                  ? Trip(
+                      routeId: routeController.currentRoute!.id,
+                      status: TripStatus.planning,
+                      startTime: DateTime.now(),
+                    )
+                  : null,
+              onTripStart: () {
+                // Start trip
+              },
+              onTripEnd: () {
+                // End trip
+              },
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Search FAB
+          FloatingActionButton(
+            heroTag: 'search',
+            onPressed: _toggleSearch,
+            child: Icon(_isSearching ? Icons.close : Icons.search),
+          ),
+          const SizedBox(height: 16),
+          // Plan Route FAB
+          FloatingActionButton(
+            heroTag: 'plan',
+            onPressed: _planRoute,
+            child: const Icon(Icons.add_road),
+          ),
+          const SizedBox(height: 16),
+          // Tracking FAB
+          FloatingActionButton(
+            heroTag: 'track',
+            onPressed: _toggleTracking,
+            backgroundColor: _isTracking ? theme.colorScheme.primary : null,
+            child: Icon(
+              _isTracking ? Icons.stop : Icons.play_arrow,
+              color: _isTracking ? Colors.white : null,
+            ),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _loadMapStyle() async {
+    final String style = await DefaultAssetBundle.of(context)
+        .loadString('assets/map_style.json');
+    _mapController.setMapStyle(style);
+  }
+}
+
+class SearchResult {
+  final String name;
+  final LatLng location;
+  final String? placeId;
+
+  SearchResult({
+    required this.name,
+    required this.location,
+    this.placeId,
+  });
 }

@@ -1,45 +1,119 @@
-// lib/presentation/controllers/places_controller.dart
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../../core/models/place.dart' as place_model;
+import '../../core/models/place.dart';
 import '../../core/services/places_service.dart';
 
 class PlacesController extends ChangeNotifier {
   final PlacesService _placesService;
-  List<place_model.Place> _searchResults = [];
+
+  List<Place> _searchResults = [];
   bool _isLoading = false;
+  String? _error;
 
-  PlacesController(this._placesService);
-
-  List<place_model.Place> get searchResults => _searchResults;
+  List<Place> get searchResults => _searchResults;
   bool get isLoading => _isLoading;
+  String? get error => _error;
 
-  Future<void> searchPlaces(String query) async {
+  PlacesController({required PlacesService placesService})
+      : _placesService = placesService;
+
+  Future<void> searchPlaces({
+    required String query,
+    LatLng? location,
+    double radiusMeters = 50000,
+    PlaceType? type,
+  }) async {
     if (query.isEmpty) {
-      clearPlaces();
+      _searchResults = [];
+      notifyListeners();
       return;
     }
 
     _isLoading = true;
+    _error = null;
     notifyListeners();
 
     try {
-      // Use searchNearby with required parameters
-      _searchResults = await _placesService.searchNearby(
-        location: const LatLng(0, 0), // You might want to get current location
-        radius: 5000, // Default radius in meters
+      _searchResults = await _placesService.searchPlaces(
+        query: query,
+        location: location,
+        radiusMeters: radiusMeters,
+        type: type,
       );
+      _isLoading = false;
+      notifyListeners();
     } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
       print('Error searching places: $e');
-      _searchResults = [];
+      notifyListeners();
     }
+  }
 
-    _isLoading = false;
+  Future<void> searchNearby({
+    required LatLng location,
+    required PlaceType type,
+    double radiusMeters = 5000,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Convert type to search query
+      String query = _getQueryForType(type);
+
+      _searchResults = await _placesService.searchPlaces(
+        query: query,
+        location: location,
+        radiusMeters: radiusMeters,
+        type: type,
+      );
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      print('Error searching nearby: $e');
+      notifyListeners();
+    }
+  }
+
+  Future<Place?> getPlaceDetails(String placeId) async {
+    try {
+      return await _placesService.getPlaceDetails(placeId);
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return null;
+    }
+  }
+
+  void clearResults() {
+    _searchResults = [];
+    _error = null;
     notifyListeners();
   }
 
-  void clearPlaces() {
-    _searchResults = [];
+  void clearError() {
+    _error = null;
     notifyListeners();
+  }
+
+  String _getQueryForType(PlaceType type) {
+    switch (type) {
+      case PlaceType.restaurant:
+        return 'restaurant';
+      case PlaceType.gasStation:
+        return 'gas station';
+      case PlaceType.hotel:
+        return 'hotel';
+      case PlaceType.convenienceStore:
+        return 'convenience store';
+      case PlaceType.touristAttraction:
+        return 'tourist attraction';
+      default:
+        return '';
+    }
   }
 }
