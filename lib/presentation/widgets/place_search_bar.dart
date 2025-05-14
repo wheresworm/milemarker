@@ -1,179 +1,236 @@
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../controllers/places_controller.dart';
-import '../../core/models/place.dart' as place_model;
+import '../widgets/empty_state.dart';
+import '../../core/models/place.dart';
 
 class PlaceSearchBar extends StatefulWidget {
-  final Function(LatLng, String) onLocationSelected;
-  final String hintText;
-  final Color? fillColor;
-  final bool showSuggestions;
-  final bool isDestination;
+  final Function(Place) onPlaceSelected;
+  final String? hintText;
+  final Widget? prefix;
+  final bool autofocus;
 
   const PlaceSearchBar({
     Key? key,
-    required this.onLocationSelected,
-    this.hintText = 'Search location',
-    this.fillColor,
-    this.showSuggestions = true,
-    this.isDestination = false,
+    required this.onPlaceSelected,
+    this.hintText,
+    this.prefix,
+    this.autofocus = false,
   }) : super(key: key);
 
   @override
   State<PlaceSearchBar> createState() => _PlaceSearchBarState();
 }
 
-class _PlaceSearchBarState extends State<PlaceSearchBar> {
-  final _searchController = TextEditingController();
-  final _focusNode = FocusNode();
-  bool _showSuggestions = false;
+class _PlaceSearchBarState extends State<PlaceSearchBar>
+    with SingleTickerProviderStateMixin {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  OverlayEntry? _overlayEntry;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
-    _focusNode.addListener(() {
-      setState(() {
-        _showSuggestions = _focusNode.hasFocus && widget.showSuggestions;
-      });
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeOut),
+    );
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (_focusNode.hasFocus) {
+      _showOverlay();
+    } else {
+      _removeOverlay();
+    }
+  }
+
+  void _showOverlay() {
+    _overlayEntry = _createOverlayEntry();
+    Overlay.of(context).insert(_overlayEntry!);
+    _animationController.forward();
+  }
+
+  void _removeOverlay() {
+    _animationController.reverse().then((_) {
+      _overlayEntry?.remove();
+      _overlayEntry = null;
     });
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _focusNode.dispose();
-    super.dispose();
+  OverlayEntry _createOverlayEntry() {
+    RenderBox renderBox = context.findRenderObject() as RenderBox;
+    var size = renderBox.size;
+    var offset = renderBox.localToGlobal(Offset.zero);
+
+    return OverlayEntry(
+      builder: (context) => Positioned(
+        left: offset.dx,
+        top: offset.dy + size.height + 8,
+        width: size.width,
+        child: Material(
+          color: Colors.transparent,
+          child: FadeTransition(
+            opacity: _fadeAnimation,
+            child: ScaleTransition(
+              scale: _scaleAnimation,
+              child: Container(
+                constraints: const BoxConstraints(maxHeight: 300),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).scaffoldBackgroundColor,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Consumer<PlacesController>(
+                  builder: (context, placesController, child) {
+                    if (placesController.isLoading) {
+                      return const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(),
+                        ),
+                      );
+                    }
+
+                    if (placesController.searchResults.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: EmptyState(
+                          icon: Icons.search_off,
+                          title: 'No places found',
+                          subtitle: 'Try searching for a different place',
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
+                      itemCount: placesController.searchResults.length,
+                      itemBuilder: (context, index) {
+                        final place = placesController.searchResults[index];
+                        return ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primaryContainer,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              Icons.place,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                          title: Text(
+                            place.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            place.address,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.color
+                                  ?.withOpacity(0.7),
+                            ),
+                          ),
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            _controller.clear();
+                            _focusNode.unfocus();
+                            widget.onPlaceSelected(place);
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final placesController = context.watch<PlacesController>();
 
-    return Container(
-      decoration: BoxDecoration(
-        color: widget.fillColor ?? Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Icon(
-                  widget.isDestination
-                      ? Icons.location_on
-                      : Icons.circle_outlined,
-                  color: widget.isDestination
-                      ? Colors.red
-                      : theme.colorScheme.primary,
-                  size: 20,
+    return TextField(
+      controller: _controller,
+      focusNode: _focusNode,
+      autofocus: widget.autofocus,
+      decoration: InputDecoration(
+        hintText: widget.hintText ?? 'Search for a place',
+        prefixIcon: widget.prefix ?? const Icon(Icons.search),
+        suffixIcon: _controller.text.isNotEmpty
+            ? IconButton(
+                icon: Icon(
+                  Icons.clear,
+                  color: Theme.of(context).textTheme.bodySmall?.color,
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _searchController,
-                    focusNode: _focusNode,
-                    decoration: InputDecoration(
-                      hintText: widget.hintText,
-                      hintStyle: TextStyle(
-                        color: theme.colorScheme.onSurface.withOpacity(0.6),
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    onChanged: (value) {
-                      if (value.isNotEmpty) {
-                        placesController.searchPlaces(value);
-                      }
-                    },
-                  ),
-                ),
-                if (_searchController.text.isNotEmpty)
-                  IconButton(
-                    icon: const Icon(Icons.clear, size: 20),
-                    onPressed: () {
-                      _searchController.clear();
-                      placesController.clearPlaces();
-                      _focusNode.unfocus();
-                    },
-                  ),
-              ],
-            ),
-          ),
-          if (_showSuggestions && placesController.searchResults.isNotEmpty)
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: ListView.builder(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: placesController.searchResults.length,
-                itemBuilder: (context, index) {
-                  final place = placesController.searchResults[index];
-                  return _buildPlaceSuggestion(place);
+                onPressed: () {
+                  _controller.clear();
+                  placesController.clearPlaces();
                 },
-              ),
-            ),
-        ],
+              )
+            : null,
+        filled: true,
+        fillColor: Theme.of(context).colorScheme.surface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 16,
+        ),
       ),
+      onChanged: (value) {
+        if (value.isNotEmpty) {
+          placesController.searchPlaces(value);
+        } else {
+          placesController.clearPlaces();
+        }
+      },
+      onSubmitted: (value) {
+        if (value.isNotEmpty) {
+          placesController.searchPlaces(value);
+        }
+      },
     );
   }
 
-  Widget _buildPlaceSuggestion(place_model.Place place) {
-    return InkWell(
-      onTap: () {
-        _searchController.text = place.name;
-        widget.onLocationSelected(place.location, place.name);
-        _focusNode.unfocus();
-        setState(() {
-          _showSuggestions = false;
-        });
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Icon(
-              Icons.location_on_outlined,
-              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    place.name,
-                    style: const TextStyle(fontWeight: FontWeight.w500),
-                  ),
-                  if (place.address != null)
-                    Text(
-                      place.address!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withOpacity(0.6),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  @override
+  void dispose() {
+    _removeOverlay();
+    _controller.dispose();
+    _focusNode.dispose();
+    _animationController.dispose();
+    super.dispose();
   }
 }

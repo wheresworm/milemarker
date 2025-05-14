@@ -13,7 +13,7 @@ class PlacesController extends ChangeNotifier {
   List<place_model.Place> get searchResults => _searchResults;
   bool get isLoading => _isLoading;
 
-  Future<void> searchPlaces({required String query}) async {
+  Future<void> searchPlaces(String query) async {
     if (query.isEmpty) {
       clearPlaces();
       return;
@@ -23,7 +23,7 @@ class PlacesController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _searchResults = await _placesService.searchPlaces(query: query);
+      _searchResults = await _placesService.searchNearby(query);
     } catch (e) {
       print('Error searching places: $e');
       _searchResults = [];
