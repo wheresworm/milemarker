@@ -1,10 +1,15 @@
-// lib/presentation/screens/route_builder_screen.dart
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
-import '../controllers/route_controller.dart';
+import '../controllers/route_controller.dart' as app_route;
+import '../controllers/theme_controller.dart';
+import '../widgets/animated_logo.dart';
 import '../widgets/place_search_bar.dart';
-import 'map_screen.dart';
+import '../widgets/route_map.dart';
+import '../widgets/route_stats_card.dart';
+import '../widgets/stop_list.dart';
+import '../widgets/route_actions.dart';
+import '../widgets/meal_stop_selector.dart';
+import '../../core/models/place.dart';
 
 class RouteBuilderScreen extends StatefulWidget {
   const RouteBuilderScreen({super.key});
@@ -13,172 +18,170 @@ class RouteBuilderScreen extends StatefulWidget {
   State<RouteBuilderScreen> createState() => _RouteBuilderScreenState();
 }
 
-class _RouteBuilderScreenState extends State<RouteBuilderScreen> {
-  LatLng? _startLocation;
-  LatLng? _endLocation;
-  String? _startName;
-  String? _endName;
+class _RouteBuilderScreenState extends State<RouteBuilderScreen>
+    with TickerProviderStateMixin {
+  Place? _origin;
+  Place? _destination;
 
-  void _onPlanRoute() async {
-    if (_startLocation != null && _endLocation != null) {
-      final routeController = context.read<RouteController>();
+  late AnimationController _contentAnimationController;
+  late AnimationController _bottomSheetController;
+  late DraggableScrollableController _draggableController;
 
-      await routeController.buildRoute(
-        origin: _startLocation!,
-        destination: _endLocation!,
-        originName: _startName ?? 'Start',
-        destinationName: _endName ?? 'End',
+  @override
+  void initState() {
+    super.initState();
+    _contentAnimationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _bottomSheetController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _draggableController = DraggableScrollableController();
+
+    // Start animation after a short delay
+    Future.delayed(const Duration(milliseconds: 300), () {
+      _contentAnimationController.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _contentAnimationController.dispose();
+    _bottomSheetController.dispose();
+    _draggableController.dispose();
+    super.dispose();
+  }
+
+  void _handleRouteCreation() {
+    if (_origin != null && _destination != null) {
+      final routeController = context.read<app_route.RouteController>();
+
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: AnimatedLogo(size: 100),
+        ),
       );
 
-      if (mounted && routeController.currentTrip != null) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (context) => MapScreen(
-              currentTrip: routeController.currentTrip,
-              isTracking: false,
-              currentLocation: null,
-              onToggleTracking: () {},
-              bottomSheetController: DraggableScrollableController(),
-              fabAnimationController: AnimationController(
-                vsync: Navigator.of(context),
-                duration: const Duration(milliseconds: 200),
-              ),
-              onPlanRoute: () {},
-            ),
-          ),
-        );
-      }
+      // Build route
+      routeController
+          .buildRoute(
+        origin: _origin!.latLng,
+        destination: _destination!.latLng,
+        originName: _origin!.name,
+        destinationName: _destination!.name,
+      )
+          .then((_) {
+        Navigator.pop(context); // Dismiss loading
+        if (routeController.currentRoute != null) {
+          // Navigate back to map
+          Navigator.pop(context, routeController.currentRoute);
+        }
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final themeController = context.watch<ThemeController>();
+    final routeController = context.watch<app_route.RouteController>();
     final theme = Theme.of(context);
-    final routeController = context.watch<RouteController>();
 
     return Scaffold(
-      backgroundColor: theme.colorScheme.surface,
       appBar: AppBar(
-        title: const Text('Plan Your Route'),
+        title: Text(
+          'Plan Your Route',
+          style: theme.textTheme.headlineSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         centerTitle: true,
-        backgroundColor: theme.colorScheme.surface,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
+        backgroundColor: theme.scaffoldBackgroundColor,
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Route Input Container
-          Container(
-            padding: const EdgeInsets.all(16),
+          // Main content
+          AnimatedBuilder(
+            animation: _contentAnimationController,
+            builder: (context, child) {
+              return Transform.translate(
+                offset: Offset(
+                  0,
+                  50 * (1 - _contentAnimationController.value),
+                ),
+                child: Opacity(
+                  opacity: _contentAnimationController.value,
+                  child: child,
+                ),
+              );
+            },
             child: Column(
               children: [
-                // Start Location Input
-                PlaceSearchBar(
-                  hintText: 'Enter start location',
-                  onLocationSelected: (location, name) {
-                    setState(() {
-                      _startLocation = location;
-                      _startName = name;
-                    });
-                  },
-                  fillColor: theme.colorScheme.surfaceContainerHighest,
-                ),
-                const SizedBox(height: 12),
-
-                // End Location Input
-                PlaceSearchBar(
-                  hintText: 'Enter destination',
-                  isDestination: true,
-                  onLocationSelected: (location, name) {
-                    setState(() {
-                      _endLocation = location;
-                      _endName = name;
-                    });
-                  },
-                  fillColor: theme.colorScheme.surfaceContainerHighest,
-                ),
-                const SizedBox(height: 16),
-
-                // Plan Route Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: (_startLocation != null && _endLocation != null)
-                        ? _onPlanRoute
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: theme.colorScheme.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                // Search inputs
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      PlaceSearchBar(
+                        hintText: 'Starting point',
+                        prefix: const Icon(Icons.trip_origin),
+                        onPlaceSelected: (place) {
+                          setState(() {
+                            _origin = place;
+                          });
+                        },
                       ),
-                    ),
-                    child: routeController.isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Plan Route',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                      const SizedBox(height: 12),
+                      PlaceSearchBar(
+                        hintText: 'Destination',
+                        prefix: const Icon(Icons.location_on),
+                        onPlaceSelected: (place) {
+                          setState(() {
+                            _destination = place;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Map
+                Expanded(
+                  child: RouteMap(
+                    origin: _origin?.latLng,
+                    destination: _destination?.latLng,
+                    stops: routeController.currentRoute?.stops ?? [],
                   ),
                 ),
               ],
             ),
           ),
 
-          // Recent Routes Section
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, -5),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(
-                      'Recent Routes',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        'No recent routes',
-                        style: TextStyle(
-                          color: theme.colorScheme.onSurface
-                              .withValues(alpha: 0.6),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+          // Bottom controls
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: RouteActions(
+              isValid: _origin != null && _destination != null,
+              onCreateRoute: _handleRouteCreation,
+              bottomSheetController: _bottomSheetController,
             ),
           ),
+
+          // Loading overlay
+          if (routeController.isLoading)
+            Container(
+              color: Colors.black26,
+              child: const Center(
+                child: AnimatedLogo(size: 100),
+              ),
+            ),
         ],
       ),
     );

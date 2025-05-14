@@ -122,7 +122,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   late AnimationController _fabAnimationController;
-  late AnimationController _bottomSheetController;
+  late AnimationController _bottomSheetAnimationController;
   late DraggableScrollableController _draggableController;
 
   final TrackingService _trackingService = TrackingService();
@@ -139,7 +139,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 300),
       vsync: this,
     );
-    _bottomSheetController = AnimationController(
+    _bottomSheetAnimationController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
@@ -186,7 +186,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _fabAnimationController.dispose();
-    _bottomSheetController.dispose();
+    _bottomSheetAnimationController.dispose();
     _draggableController.dispose();
     super.dispose();
   }
@@ -206,7 +206,7 @@ class _MainScreenState extends State<MainScreen> with TickerProviderStateMixin {
               Navigator.pushNamed(context, '/route-builder');
             },
             fabAnimationController: _fabAnimationController,
-            bottomSheetController: _bottomSheetController,
+            bottomSheetController: _bottomSheetAnimationController,
           ),
           const TripsScreen(),
           const SettingsScreen(),
