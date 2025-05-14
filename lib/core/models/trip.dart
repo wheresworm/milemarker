@@ -4,6 +4,8 @@ class Trip {
   final String id;
   final String routeId;
   final UserRoute? route;
+  final String title;
+  final String? category;
   final DateTime startTime;
   final DateTime? endTime;
   final TripStatus status;
@@ -17,6 +19,8 @@ class Trip {
     String? id,
     required this.routeId,
     this.route,
+    required this.title,
+    this.category,
     required this.startTime,
     this.endTime,
     required this.status,
@@ -31,6 +35,8 @@ class Trip {
     String? id,
     String? routeId,
     UserRoute? route,
+    String? title,
+    String? category,
     DateTime? startTime,
     DateTime? endTime,
     TripStatus? status,
@@ -44,6 +50,8 @@ class Trip {
       id: id ?? this.id,
       routeId: routeId ?? this.routeId,
       route: route ?? this.route,
+      title: title ?? this.title,
+      category: category ?? this.category,
       startTime: startTime ?? this.startTime,
       endTime: endTime ?? this.endTime,
       status: status ?? this.status,
@@ -59,6 +67,8 @@ class Trip {
         'id': id,
         'routeId': routeId,
         'route': route?.toJson(),
+        'title': title,
+        'category': category,
         'startTime': startTime.toIso8601String(),
         'endTime': endTime?.toIso8601String(),
         'status': status.toString().split('.').last,
@@ -76,6 +86,8 @@ class Trip {
       id: json['id'],
       routeId: json['routeId'],
       route: json['route'] != null ? UserRoute.fromJson(json['route']) : null,
+      title: json['title'] ?? 'Trip',
+      category: json['category'],
       startTime: DateTime.parse(json['startTime']),
       endTime: json['endTime'] != null ? DateTime.parse(json['endTime']) : null,
       status: TripStatus.values.firstWhere(
