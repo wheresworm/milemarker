@@ -69,6 +69,8 @@ class Trip {
         'analytics': analytics,
       };
 
+  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+
   factory Trip.fromJson(Map<String, dynamic> json) {
     return Trip(
       id: json['id'],
@@ -87,6 +89,9 @@ class Trip {
       analytics: json['analytics'],
     );
   }
+
+  factory Trip.fromMap(Map<String, dynamic> map) =>
+      Trip.fromJson(map); // Alias for database compatibility
 }
 
 enum TripStatus { planning, active, paused, completed, cancelled }

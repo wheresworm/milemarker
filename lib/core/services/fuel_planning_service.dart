@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/fuel_stop.dart';
 import '../models/place.dart';
@@ -47,7 +48,7 @@ class FuelPlanningService {
       if (pointOnRoute != null) {
         // Search for gas stations near this point
         final nearbyStations = await _placesService.searchAlongRoute(
-          routePoints: route.polylinePoints,
+          routePoints: [pointOnRoute], // Just search around this point
           type: PlaceType.gasStation,
           maxDetourMeters: 5000,
         );
@@ -116,20 +117,18 @@ class FuelPlanningService {
 
   double _calculateDistance(LatLng p1, LatLng p2) {
     const double earthRadius = 6371000; // meters
-    final double lat1Rad = p1.latitude * (3.141592653589793 / 180);
-    final double lat2Rad = p2.latitude * (3.141592653589793 / 180);
-    final double deltaLat =
-        (p2.latitude - p1.latitude) * (3.141592653589793 / 180);
-    final double deltaLng =
-        (p2.longitude - p1.longitude) * (3.141592653589793 / 180);
+    final double lat1Rad = p1.latitude * (math.pi / 180);
+    final double lat2Rad = p2.latitude * (math.pi / 180);
+    final double deltaLat = (p2.latitude - p1.latitude) * (math.pi / 180);
+    final double deltaLng = (p2.longitude - p1.longitude) * (math.pi / 180);
 
-    final double a = (deltaLat / 2).sin() * (deltaLat / 2).sin() +
-        lat1Rad.cos() *
-            lat2Rad.cos() *
-            (deltaLng / 2).sin() *
-            (deltaLng / 2).sin();
+    final double a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
+        math.cos(lat1Rad) *
+            math.cos(lat2Rad) *
+            math.sin(deltaLng / 2) *
+            math.sin(deltaLng / 2);
 
-    final double c = 2 * a.sqrt().asin();
+    final double c = 2 * math.asin(math.sqrt(a));
 
     return earthRadius * c / 1609.344; // Convert to miles
   }
