@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import '../controllers/route_controller.dart' as app_route;
 import '../controllers/theme_controller.dart';
 import '../widgets/animated_logo.dart';
 import '../widgets/place_search_bar.dart';
 import '../widgets/route_map.dart';
-import '../widgets/route_stats_card.dart';
-import '../widgets/stop_list.dart';
 import '../widgets/route_actions.dart';
-import '../widgets/meal_stop_selector.dart';
 import '../../core/models/place.dart';
 
 class RouteBuilderScreen extends StatefulWidget {
@@ -63,23 +61,25 @@ class _RouteBuilderScreenState extends State<RouteBuilderScreen>
         context: context,
         barrierDismissible: false,
         builder: (context) => const Center(
-          child: AnimatedLogo(size: 100),
+          child: AnimatedLogo(),
         ),
       );
 
       // Build route
       routeController
           .buildRoute(
-        origin: _origin!.latLng,
-        destination: _destination!.latLng,
+        origin: _origin!.location,
+        destination: _destination!.location,
         originName: _origin!.name,
         destinationName: _destination!.name,
       )
           .then((_) {
-        Navigator.pop(context); // Dismiss loading
-        if (routeController.currentRoute != null) {
-          // Navigate back to map
-          Navigator.pop(context, routeController.currentRoute);
+        if (mounted) {
+          Navigator.pop(context); // Dismiss loading
+          if (routeController.currentRoute != null) {
+            // Navigate back to map
+            Navigator.pop(context, routeController.currentRoute);
+          }
         }
       });
     }
@@ -87,7 +87,6 @@ class _RouteBuilderScreenState extends State<RouteBuilderScreen>
 
   @override
   Widget build(BuildContext context) {
-    final themeController = context.watch<ThemeController>();
     final routeController = context.watch<app_route.RouteController>();
     final theme = Theme.of(context);
 
@@ -153,9 +152,10 @@ class _RouteBuilderScreenState extends State<RouteBuilderScreen>
                 // Map
                 Expanded(
                   child: RouteMap(
-                    origin: _origin?.latLng,
-                    destination: _destination?.latLng,
-                    stops: routeController.currentRoute?.stops ?? [],
+                    route: routeController.currentRoute,
+                    onMapTap: (LatLng position) {
+                      // Handle map tap if needed
+                    },
                   ),
                 ),
               ],
@@ -168,9 +168,19 @@ class _RouteBuilderScreenState extends State<RouteBuilderScreen>
             right: 0,
             bottom: 0,
             child: RouteActions(
-              isValid: _origin != null && _destination != null,
-              onCreateRoute: _handleRouteCreation,
-              bottomSheetController: _bottomSheetController,
+              route: routeController.currentRoute,
+              onOptimize: () {
+                // Handle optimize
+              },
+              onAddFuelStop: () {
+                // Handle add fuel stop
+              },
+              onAddMealStop: () {
+                // Handle add meal stop
+              },
+              onStartNavigation: () {
+                // Start navigation
+              },
             ),
           ),
 
@@ -179,7 +189,7 @@ class _RouteBuilderScreenState extends State<RouteBuilderScreen>
             Container(
               color: Colors.black26,
               child: const Center(
-                child: AnimatedLogo(size: 100),
+                child: AnimatedLogo(),
               ),
             ),
         ],

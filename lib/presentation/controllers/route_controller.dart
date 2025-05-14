@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../core/models/trip.dart';
 import '../../core/models/route.dart' as route_model;
-import '../../core/models/route_segment.dart';
+import '../../core/models/location_point.dart';
 import '../../core/models/place_stop.dart';
 import '../../core/services/route_service.dart';
 import '../../core/services/database_service.dart';
@@ -32,31 +32,25 @@ class RouteController extends ChangeNotifier {
 
     try {
       // Create the route using the correct method from RouteService
-      final segments = await _routeService.getDetailedRoute(
+      final route = await _routeService.createRoute(
         origin: origin,
         destination: destination,
-        departureTime: DateTime.now(),
       );
 
-      // Create route model
-      _currentRoute = route_model.Route(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: '$originName to $destinationName',
-        departureTime: DateTime.now(),
-        segments: segments,
-        stops: [], // Initially empty, user can add stops later
-      );
+      _currentRoute = route;
+
+      // Create empty location points list for trip
+      final List<LocationPoint> locationPoints = [];
 
       // Create a new trip
       _currentTrip = Trip(
         id: 0, // Will be assigned by the database
-        route: _currentRoute!,
-        startTime: DateTime.now(),
+        locationPoints: locationPoints,
         averageSpeed: 0.0,
         maxSpeed: 0.0,
-        distance: _currentRoute!.totalMiles,
-        duration: Duration(minutes: _currentRoute!.estimatedDuration.inMinutes),
-        locationPoints: [], // Will be populated during tracking
+        distance: 0.0, // Will be calculated during tracking
+        duration: const Duration(),
+        startTime: DateTime.now(),
       );
 
       // Save to database

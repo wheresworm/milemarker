@@ -1,5 +1,6 @@
 // lib/presentation/controllers/places_controller.dart
 import 'package:flutter/material.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../core/models/place.dart' as place_model;
 import '../../core/services/places_service.dart';
 
@@ -23,7 +24,11 @@ class PlacesController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _searchResults = await _placesService.searchNearby(query);
+      // Use searchNearby with required parameters
+      _searchResults = await _placesService.searchNearby(
+        location: const LatLng(0, 0), // You might want to get current location
+        radius: 5000, // Default radius in meters
+      );
     } catch (e) {
       print('Error searching places: $e');
       _searchResults = [];

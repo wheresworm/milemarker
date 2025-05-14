@@ -44,15 +44,24 @@ void main() async {
     ),
   );
 
-  // Create services - fixing the constructors based on your actual code
+  // Create services with correct parameters
   final directionsService = DirectionsService();
   final placesService = PlacesService();
-  final foodStopService = FoodStopService(placesService);
-  final fuelPlanningService = FuelPlanningService(placesService: placesService);
+  final foodStopService = FoodStopService(
+    directionsService: directionsService,
+    placesService: placesService,
+  );
+  final fuelPlanningService = FuelPlanningService(
+    placesService: placesService,
+  );
   final optimizationService = RouteOptimizationService();
   final routeService = RouteService(
     directionsService: directionsService,
     placesService: placesService,
+    databaseService: databaseService,
+    foodStopService: foodStopService,
+    fuelPlanningService: fuelPlanningService,
+    optimizationService: optimizationService,
   );
 
   runApp(
