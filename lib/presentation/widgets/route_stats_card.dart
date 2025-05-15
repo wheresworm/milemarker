@@ -1,295 +1,210 @@
-// lib/presentation/widgets/route_stats_card.dart
 import 'package:flutter/material.dart';
-import '../../core/models/route_stats.dart';
+import 'package:provider/provider.dart';
+import '../../core/models/trip.dart';
 import '../../core/models/stop.dart';
 import '../../core/models/food_stop.dart';
 import '../../core/models/fuel_stop.dart';
-import '../../core/models/place_stop.dart';
+import '../../core/utils/formatters.dart';
+import '../controllers/tracking_controller.dart';
 
-// Rest of the file continues...
 class RouteStatsCard extends StatelessWidget {
-  final RouteStats stats;
-  final bool expanded;
+  final Trip trip;
+  final bool isExpanded;
+  final VoidCallback onExpand;
+  final VoidCallback? onStartNavigation;
+  final VoidCallback? onEndTrip;
 
   const RouteStatsCard({
     super.key,
-    required this.stats,
-    this.expanded = false,
+    required this.trip,
+    required this.isExpanded,
+    required this.onExpand,
+    this.onStartNavigation,
+    this.onEndTrip,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final trackingController = context.watch<TrackingController>();
+    final isTracking = trackingController.currentTripId == trip.id;
 
-    if (!expanded) {
-      return _buildCompactView(context);
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Route Statistics',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildStatRow(
-              context,
-              'Distance',
-              '${stats.totalDistance.toStringAsFixed(1)} mi',
-              Icons.straighten,
-            ),
-            _buildStatRow(
-              context,
-              'Duration',
-              _formatDuration(stats.totalDuration),
-              Icons.timer,
-            ),
-            _buildStatRow(
-              context,
-              'Average Speed',
-              '${stats.averageSpeed.toStringAsFixed(1)} mph',
-              Icons.speed,
-            ),
-            const Divider(height: 24),
-            _buildCostEstimates(context),
-            const Divider(height: 24),
-            _buildStopBreakdown(context),
-            if (stats.statesTraversed.isNotEmpty) ...[
-              const Divider(height: 24),
-              _buildStateBreakdown(context),
-            ],
-          ],
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      height: isExpanded ? MediaQuery.of(context).size.height * 0.4 : 120,
+      child: Card(
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        elevation: 8,
+        child: InkWell(
+          onTap: onExpand,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: isExpanded
+                ? _buildExpandedContent(context)
+                : _buildCollapsedContent(context),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCompactView(BuildContext context) {
+  Widget _buildCollapsedContent(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildCompactStat(
-              context,
-              Icons.straighten,
-              '${stats.totalDistance.toStringAsFixed(1)} mi',
-            ),
-            _buildCompactStat(
-              context,
-              Icons.timer,
-              _formatDuration(stats.totalDuration),
-            ),
-            if (stats.estimatedFuelCost > 0)
-              _buildCompactStat(
-                context,
-                Icons.local_gas_station,
-                '\$${stats.estimatedFuelCost.toStringAsFixed(2)}',
-              ),
-            if (stats.estimatedTolls > 0)
-              _buildCompactStat(
-                context,
-                Icons.toll,
-                '\$${stats.estimatedTolls.toStringAsFixed(2)}',
-              ),
-          ],
+    return Row(
+      children: [
+        _buildStatColumn(
+          context,
+          Icons.route,
+          Formatters.formatDistance(trip.totalDistance ?? 0),
+          'Distance',
         ),
-      ),
+        const Spacer(),
+        _buildStatColumn(
+          context,
+          Icons.access_time,
+          Formatters.formatDuration(trip.totalDuration ?? Duration.zero),
+          'Duration',
+        ),
+        const Spacer(),
+        _buildStatColumn(
+          context,
+          Icons.place,
+          '${trip.stops?.length ?? 0}',
+          'Stops',
+        ),
+        const SizedBox(width: 16),
+        Icon(
+          isExpanded ? Icons.expand_less : Icons.expand_more,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ],
     );
   }
 
-  Widget _buildCompactStat(BuildContext context, IconData icon, String value) {
+  Widget _buildExpandedContent(BuildContext context) {
     final theme = Theme.of(context);
 
     return Column(
-      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 20, color: theme.colorScheme.primary),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: theme.textTheme.labelMedium?.copyWith(
-            fontWeight: FontWeight.bold,
+        Row(
+          children: [
+            Text(
+              trip.title,
+              style: theme.textTheme.headlineMedium,
+            ),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: onExpand,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                _buildStatsGrid(context),
+                const SizedBox(height: 24),
+                _buildActionButtons(context),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildStatRow(
+  Widget _buildStatsGrid(BuildContext context) {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 3,
+      childAspectRatio: 1.2,
+      children: [
+        _buildStatCard(
+          context,
+          Icons.route,
+          Formatters.formatDistance(trip.totalDistance ?? 0),
+          'Total Distance',
+          Colors.blue,
+        ),
+        _buildStatCard(
+          context,
+          Icons.access_time,
+          Formatters.formatDuration(trip.totalDuration ?? Duration.zero),
+          'Duration',
+          Colors.green,
+        ),
+        _buildStatCard(
+          context,
+          Icons.place,
+          '${trip.stops?.length ?? 0}',
+          'Stops',
+          Colors.orange,
+        ),
+        _buildStatCard(
+          context,
+          Icons.speed,
+          '${_calculateAverageSpeed().toStringAsFixed(0)} mph',
+          'Avg Speed',
+          Colors.purple,
+        ),
+        _buildStatCard(
+          context,
+          Icons.schedule,
+          _getEstimatedArrival(),
+          'ETA',
+          Colors.red,
+        ),
+        _buildStatCard(
+          context,
+          Icons.trending_up,
+          '+${_getElevationGain()}ft',
+          'Elevation',
+          Colors.teal,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(
     BuildContext context,
-    String label,
-    String value,
     IconData icon,
+    String value,
+    String label,
+    Color color,
   ) {
     final theme = Theme.of(context);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+    return Container(
+      margin: const EdgeInsets.all(4),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 20, color: theme.colorScheme.primary),
-          const SizedBox(width: 12),
-          Text(
-            label,
-            style: theme.textTheme.bodyLarge,
-          ),
-          const Spacer(),
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 4),
           Text(
             value,
-            style: theme.textTheme.bodyLarge?.copyWith(
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: color,
               fontWeight: FontWeight.bold,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCostEstimates(BuildContext context) {
-    final theme = Theme.of(context);
-    final totalCost = stats.estimatedFuelCost + stats.estimatedTolls;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Estimated Costs',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (stats.estimatedFuelCost > 0)
-          _buildCostRow(
-            context,
-            'Fuel',
-            '\$${stats.estimatedFuelCost.toStringAsFixed(2)}',
-          ),
-        if (stats.estimatedTolls > 0)
-          _buildCostRow(
-            context,
-            'Tolls',
-            '\$${stats.estimatedTolls.toStringAsFixed(2)}',
-          ),
-        const Divider(height: 8),
-        _buildCostRow(
-          context,
-          'Total',
-          '\$${totalCost.toStringAsFixed(2)}',
-          bold: true,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCostRow(
-    BuildContext context,
-    String label,
-    String value, {
-    bool bold = false,
-  }) {
-    final theme = Theme.of(context);
-    final textStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontWeight: bold ? FontWeight.bold : null,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Text(label, style: textStyle),
-          const Spacer(),
-          Text(value, style: textStyle),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStopBreakdown(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Stops',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 8),
-        ...stats.stopTypeBreakdown.entries.map((entry) {
-          return _buildStopTypeRow(
-            context,
-            entry.key,
-            entry.value,
-          );
-        }).toList(),
-        if (stats.mealStops.isNotEmpty) ...[
-          const SizedBox(height: 8),
           Text(
-            'Meal Stops:',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          ...stats.mealStops.map((stop) => _buildMealStopDetail(context, stop)),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildStopTypeRow(BuildContext context, Type type, int count) {
-    final theme = Theme.of(context);
-    String typeName = type.toString().split('.').last;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(
-            _getIconForType(type),
-            size: 16,
-            color: theme.colorScheme.secondary,
-          ),
-          const SizedBox(width: 8),
-          Text(typeName),
-          const Spacer(),
-          Text('$count'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMealStopDetail(BuildContext context, Stop stop) {
-    if (stop is! FoodStop) return const SizedBox();
-
-    final theme = Theme.of(context);
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 24, top: 4),
-      child: Row(
-        children: [
-          Icon(
-            _getMealIcon(stop.mealType),
-            size: 16,
-            color: theme.colorScheme.tertiary,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '${stop.mealType.toString().split('.').last.capitalize()} at ${stop.name}',
-              style: theme.textTheme.bodySmall,
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         ],
@@ -297,77 +212,98 @@ class RouteStatsCard extends StatelessWidget {
     );
   }
 
-  IconData _getMealIcon(MealType type) {
-    switch (type) {
-      case MealType.breakfast:
-        return Icons.breakfast_dining;
-      case MealType.lunch:
-        return Icons.lunch_dining;
-      case MealType.dinner:
-        return Icons.dinner_dining;
-      // Removed MealType.snack case since it doesn't exist
-    }
-  }
-
-  Widget _buildStateBreakdown(BuildContext context) {
+  Widget _buildStatColumn(
+    BuildContext context,
+    IconData icon,
+    String value,
+    String label,
+  ) {
     final theme = Theme.of(context);
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        Icon(
+          icon,
+          color: theme.colorScheme.primary,
+          size: 24,
+        ),
+        const SizedBox(height: 4),
         Text(
-          'States Traversed',
+          value,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.bold,
           ),
         ),
-        const SizedBox(height: 8),
-        ...stats.statesTraversed.map((state) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.location_city,
-                  size: 16,
-                  color: theme.colorScheme.secondary,
-                ),
-                const SizedBox(width: 8),
-                Text(state.stateName),
-                const Spacer(),
-                Text(
-                  '${state.miles.toStringAsFixed(1)} mi',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
-            ),
-          );
-        }).toList(),
+        Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }
 
-  IconData _getIconForType(Type type) {
-    if (type == FoodStop) return Icons.restaurant;
-    if (type == FuelStop) return Icons.local_gas_station;
-    if (type == PlaceStop) return Icons.place;
-    return Icons.stop_circle;
+  Widget _buildActionButtons(BuildContext context) {
+    final theme = Theme.of(context);
+    final trackingController = context.watch<TrackingController>();
+    final isTracking = trackingController.currentTripId == trip.id;
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (trip.status == TripStatus.active && !isTracking)
+          ElevatedButton.icon(
+            onPressed: onStartNavigation,
+            icon: const Icon(Icons.navigation),
+            label: const Text('Start Navigation'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: theme.colorScheme.primary,
+              foregroundColor: theme.colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          )
+        else if (isTracking)
+          ElevatedButton.icon(
+            onPressed: onEndTrip,
+            icon: const Icon(Icons.stop),
+            label: const Text('End Trip'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          ),
+      ],
+    );
   }
 
-  String _formatDuration(Duration duration) {
-    final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60);
+  double _calculateAverageSpeed() {
+    if (trip.totalDistance == null || trip.totalDuration == null) return 0;
+    if (trip.totalDuration!.inSeconds == 0) return 0;
 
-    if (hours > 0) {
-      return '${hours}h ${minutes}m';
+    final hours = trip.totalDuration!.inSeconds / 3600;
+    return trip.totalDistance! / hours;
+  }
+
+  String _getEstimatedArrival() {
+    if (trip.startedAt == null || trip.totalDuration == null) {
+      return 'N/A';
     }
-    return '${minutes}m';
-  }
-}
 
-extension StringExtension on String {
-  String capitalize() {
-    if (isEmpty) return this;
-    return '${this[0].toUpperCase()}${substring(1)}';
+    final eta = trip.startedAt!.add(trip.totalDuration!);
+    final now = DateTime.now();
+
+    if (eta.isBefore(now)) {
+      return 'Arrived';
+    }
+
+    return '${eta.hour.toString().padLeft(2, '0')}:${eta.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _getElevationGain() {
+    // This is a placeholder - you'd calculate this from route data
+    return '1,234';
   }
 }

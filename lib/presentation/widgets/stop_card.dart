@@ -1,177 +1,183 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../../core/models/stop.dart';
 import '../../core/models/food_stop.dart';
 import '../../core/models/fuel_stop.dart';
-import '../../core/models/place_stop.dart';
+import '../../core/utils/constants.dart';
 
 class StopCard extends StatelessWidget {
   final Stop stop;
-  final int index;
-  final bool isFirst;
-  final bool isLast;
-  final VoidCallback onTap;
-  final VoidCallback? onRemove;
+  final VoidCallback? onTap;
+  final VoidCallback? onDelete;
+  final void Function(int)? onReorder;
+  final bool isReordering;
 
   const StopCard({
     super.key,
     required this.stop,
-    required this.index,
-    required this.isFirst,
-    required this.isLast,
-    required this.onTap,
-    this.onRemove,
+    this.onTap,
+    this.onDelete,
+    this.onReorder,
+    this.isReordering = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              // Drag handle
-              Icon(
-                Icons.drag_handle,
-                color: theme.colorScheme.outline,
-              ),
-              const SizedBox(width: 16),
-
-              // Stop icon
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: _getStopColor(theme).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  _getStopIcon(),
-                  color: _getStopColor(theme),
-                ),
-              ),
-              const SizedBox(width: 16),
-
-              // Stop details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      stop.name,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+    return Dismissible(
+      key: Key(stop.id),
+      direction: onDelete != null && !isReordering
+          ? DismissDirection.endToStart
+          : DismissDirection.none,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        color: Colors.red,
+        child: const Icon(
+          Icons.delete,
+          color: Colors.white,
+        ),
+      ),
+      onDismissed: onDelete != null ? (_) => onDelete!() : null,
+      child: Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: theme.colorScheme.outline.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                if (isReordering)
+                  ReorderableDragStartListener(
+                    index: stop.order,
+                    child: const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: Icon(
+                        Icons.drag_handle,
+                        color: Colors.grey,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _getStopSubtitle(),
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+                  ),
+                _buildIcon(theme),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        stop.name,
+                        style: theme.textTheme.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                    if (stop.timeWindow != null) ...[
                       const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.access_time,
-                            size: 16,
-                            color: theme.colorScheme.outline,
+                      if (stop.timeWindow != null)
+                        Text(
+                          _formatTimeWindow(stop.timeWindow!),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.7),
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatTime(stop.timeWindow!.preferred),
+                        ),
+                      if (stop.notes != null && stop.notes!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            stop.notes!,
                             style: theme.textTheme.bodySmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
+                        ),
                     ],
-                  ],
+                  ),
                 ),
-              ),
-
-              // Actions
-              if (onRemove != null)
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    HapticFeedback.lightImpact();
-                    onRemove!();
-                  },
-                  color: theme.colorScheme.error,
-                ),
-            ],
+                if (stop.estimatedDuration != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      _formatDuration(stop.estimatedDuration!),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  IconData _getStopIcon() {
-    if (stop is FoodStop) {
-      switch ((stop as FoodStop).mealType) {
-        case MealType.breakfast:
-          return Icons.breakfast_dining;
-        case MealType.lunch:
-          return Icons.lunch_dining;
-        case MealType.dinner:
-          return Icons.dinner_dining;
-        case MealType.snack:
-          return Icons.local_cafe;
-      }
-    } else if (stop is FuelStop) {
-      return Icons.local_gas_station;
-    } else if (isFirst) {
-      return Icons.home;
-    } else if (isLast) {
-      return Icons.flag;
-    }
-    return Icons.location_on;
-  }
+  Widget _buildIcon(ThemeData theme) {
+    IconData iconData;
+    Color iconColor;
 
-  Color _getStopColor(ThemeData theme) {
-    if (stop is FoodStop) {
-      return Colors.orange;
-    } else if (stop is FuelStop) {
-      return Colors.blue;
-    } else if (isFirst) {
-      return Colors.green;
-    } else if (isLast) {
-      return Colors.red;
-    }
-    return theme.colorScheme.primary;
-  }
-
-  String _getStopSubtitle() {
     if (stop is FoodStop) {
       final foodStop = stop as FoodStop;
-      if (foodStop.selectedRestaurant != null) {
-        return foodStop.selectedRestaurant!.name;
-      }
-      return '${foodStop.mealType.toString().split('.').last} stop';
+      iconData = _getMealIcon(foodStop.mealType);
+      iconColor = Colors.orange;
     } else if (stop is FuelStop) {
-      final fuelStop = stop as FuelStop;
-      return '${fuelStop.brand.toString().split('.').last} - \$${fuelStop.pricePerGallon.toStringAsFixed(2)}/gal';
-    } else if (isFirst) {
-      return 'Starting point';
-    } else if (isLast) {
-      return 'Destination';
+      iconData = Icons.local_gas_station;
+      iconColor = Colors.blue;
+    } else {
+      iconData = Icons.place;
+      iconColor = theme.colorScheme.primary;
     }
-    return 'Stop ${index + 1}';
+
+    return Container(
+      width: 48,
+      height: 48,
+      decoration: BoxDecoration(
+        color: iconColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(
+        iconData,
+        color: iconColor,
+        size: 24,
+      ),
+    );
   }
 
-  String _formatTime(DateTime time) {
-    final hour = time.hour;
-    final minute = time.minute;
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-    return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+  IconData _getMealIcon(MealType mealType) {
+    switch (mealType) {
+      case MealType.breakfast:
+        return Icons.breakfast_dining;
+      case MealType.lunch:
+        return Icons.lunch_dining;
+      case MealType.dinner:
+        return Icons.dinner_dining;
+    }
+  }
+
+  String _formatTimeWindow(TimeWindow timeWindow) {
+    final preferredTime =
+        '${timeWindow.preferred.hour}:${timeWindow.preferred.minute.toString().padLeft(2, '0')}';
+    return 'Preferred: $preferredTime';
+  }
+
+  String _formatDuration(Duration duration) {
+    if (duration.inHours > 0) {
+      return '${duration.inHours}h ${duration.inMinutes % 60}m';
+    }
+    return '${duration.inMinutes}m';
   }
 }

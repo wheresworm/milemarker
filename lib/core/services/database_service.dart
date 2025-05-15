@@ -1,22 +1,17 @@
-// lib/core/services/database_service.dart
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
-import '../models/user_route.dart';
 import '../models/trip.dart';
 import '../models/stop.dart';
-import '../models/settings.dart';
-import '../models/place_stop.dart';
 import '../models/food_stop.dart';
 import '../models/fuel_stop.dart';
-import '../models/place.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../models/favorite_route.dart';
+import '../models/route_template.dart';
 
 class DatabaseService {
-  static final DatabaseService _instance = DatabaseService._internal();
-  static Database? _database;
+  static const String _databaseName = 'milemarker.db';
+  static const int _databaseVersion = 1;
 
-  factory DatabaseService() => _instance;
-  DatabaseService._internal();
+  Database? _database;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -26,217 +21,124 @@ class DatabaseService {
 
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'milemarker.db');
+    final path = '$dbPath/$_databaseName';
 
     return await openDatabase(
       path,
-      version: 1,
+      version: _databaseVersion,
       onCreate: _onCreate,
     );
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // Routes table
-    await db.execute('''
-      CREATE TABLE routes(
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        startPoint TEXT NOT NULL,
-        endPoint TEXT NOT NULL,
-        distance REAL,
-        duration INTEGER,
-        createdAt INTEGER NOT NULL,
-        lastUsed INTEGER,
-        useCount INTEGER DEFAULT 0,
-        notes TEXT
-      )
-    ''');
-
-    // Stops table
-    await db.execute('''
-      CREATE TABLE stops(
-        id TEXT PRIMARY KEY,
-        routeId TEXT NOT NULL,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL,
-        latitude REAL NOT NULL,
-        longitude REAL NOT NULL,
-        orderIndex INTEGER NOT NULL,
-        estimatedDuration INTEGER NOT NULL,
-        notes TEXT,
-        stopData TEXT,
-        FOREIGN KEY (routeId) REFERENCES routes (id) ON DELETE CASCADE
-      )
-    ''');
-
-    // Trips table
+    // Create trips table
     await db.execute('''
       CREATE TABLE trips(
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
-        routeId TEXT NOT NULL,
         status TEXT NOT NULL,
-        startTime INTEGER,
-        endTime INTEGER,
-        actualDuration INTEGER,
-        progress REAL DEFAULT 0.0,
-        currentStopIndex INTEGER DEFAULT 0,
-        lastUpdated INTEGER NOT NULL,
-        trackingData TEXT,
-        notes TEXT,
-        FOREIGN KEY (routeId) REFERENCES routes (id)
+        startedAt TEXT,
+        completedAt TEXT,
+        totalDistance REAL,
+        totalDuration INTEGER,
+        routeData TEXT,
+        lastUpdated TEXT NOT NULL
       )
     ''');
 
-    // Settings table
+    // Create stops table
     await db.execute('''
-      CREATE TABLE settings(
-        id INTEGER PRIMARY KEY,
-        theme TEXT NOT NULL,
-        notifications INTEGER NOT NULL,
-        autoSave INTEGER NOT NULL,
-        defaultMapType TEXT NOT NULL,
-        unitSystem TEXT NOT NULL,
-        currentVehicleId TEXT,
-        settingsData TEXT
+      CREATE TABLE stops(
+        id TEXT PRIMARY KEY,
+        tripId TEXT NOT NULL,
+        name TEXT NOT NULL,
+        location TEXT NOT NULL,
+        order_index INTEGER NOT NULL,
+        estimatedDuration INTEGER,
+        timeWindow TEXT,
+        notes TEXT,
+        type TEXT NOT NULL,
+        FOREIGN KEY (tripId) REFERENCES trips (id) ON DELETE CASCADE
       )
     ''');
 
-    // Insert default settings
-    await db.insert('settings', {
-      'id': 1,
-      'theme': 'system',
-      'notifications': 1,
-      'autoSave': 1,
-      'defaultMapType': 'normal',
-      'unitSystem': 'imperial',
-    });
-  }
+    // Create favorite_routes table
+    await db.execute('''
+      CREATE TABLE favorite_routes(
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        routeData TEXT NOT NULL,
+        lastUsed TEXT,
+        useCount INTEGER DEFAULT 0
+      )
+    ''');
 
-  // Route methods
-  Future<void> saveRoute(UserRoute route) async {
-    final db = await database;
-    await db.insert(
-      'routes',
-      {
-        'id': route.id,
-        'title': route.title,
-        'startPoint': route.startPoint,
-        'endPoint': route.endPoint,
-        'distance': route.distance,
-        'duration': route.duration?.inSeconds,
-        'createdAt': route.createdAt.millisecondsSinceEpoch,
-        'lastUsed': route.lastUsed?.millisecondsSinceEpoch,
-        'useCount': route.useCount,
-        'notes': route.notes,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-
-    // Save stops
-    await _saveStopsForRoute(route.id, route.stops);
-  }
-
-  Future<List<UserRoute>> getRoutes() async {
-    final db = await database;
-    final List<Map<String, dynamic>> maps =
-        await db.query('routes', orderBy: 'lastUsed DESC');
-
-    List<UserRoute> routes = [];
-    for (var map in maps) {
-      final stops = await _getStopsForRoute(map['id'] as String);
-      routes.add(UserRoute(
-        id: map['id'] as String,
-        title: map['title'] as String,
-        startPoint: map['startPoint'] as String,
-        endPoint: map['endPoint'] as String,
-        stops: stops,
-        distance: map['distance'] as double?,
-        duration: map['duration'] != null
-            ? Duration(seconds: map['duration'] as int)
-            : null,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int),
-        lastUsed: map['lastUsed'] != null
-            ? DateTime.fromMillisecondsSinceEpoch(map['lastUsed'] as int)
-            : null,
-        useCount: map['useCount'] as int,
-        notes: map['notes'] as String?,
-      ));
-    }
-
-    return routes;
-  }
-
-  Future<void> updateRoute(UserRoute route) async {
-    await saveRoute(route);
-  }
-
-  Future<void> deleteRoute(String routeId) async {
-    final db = await database;
-    await db.delete(
-      'routes',
-      where: 'id = ?',
-      whereArgs: [routeId],
-    );
+    // Create route_templates table
+    await db.execute('''
+      CREATE TABLE route_templates(
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        stops TEXT NOT NULL,
+        preferences TEXT,
+        createdAt TEXT NOT NULL
+      )
+    ''');
   }
 
   // Trip methods
-  Future<String> saveTrip(Trip trip) async {
+  Future<void> insertTrip(Trip trip) async {
     final db = await database;
     await db.insert(
       'trips',
       {
         'id': trip.id,
         'title': trip.title,
-        'routeId': trip.routeId,
         'status': trip.status.toString().split('.').last,
-        'startTime': trip.startTime?.millisecondsSinceEpoch,
-        'endTime': trip.endTime?.millisecondsSinceEpoch,
-        'actualDuration': trip.actualDuration?.inSeconds,
-        'progress': trip.progress,
-        'currentStopIndex': trip.currentStopIndex,
-        'lastUpdated': trip.lastUpdated.millisecondsSinceEpoch,
-        'notes': trip.notes,
+        'startedAt': trip.startedAt?.toIso8601String(),
+        'completedAt': trip.completedAt?.toIso8601String(),
+        'totalDistance': trip.totalDistance,
+        'totalDuration': trip.totalDuration?.inSeconds,
+        'routeData':
+            trip.route != null ? jsonEncode(trip.route!.toJson()) : null,
+        'lastUpdated': trip.lastUpdated.toIso8601String(),
       },
-      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    return trip.id;
+
+    // Insert stops
+    if (trip.stops != null) {
+      for (final stop in trip.stops!) {
+        await insertStop(trip.id, stop);
+      }
+    }
   }
 
-  Future<List<Trip>> getTrips() async {
+  Future<void> updateTrip(Trip trip) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps =
-        await db.query('trips', orderBy: 'lastUpdated DESC');
+    await db.update(
+      'trips',
+      {
+        'title': trip.title,
+        'status': trip.status.toString().split('.').last,
+        'startedAt': trip.startedAt?.toIso8601String(),
+        'completedAt': trip.completedAt?.toIso8601String(),
+        'totalDistance': trip.totalDistance,
+        'totalDuration': trip.totalDuration?.inSeconds,
+        'routeData':
+            trip.route != null ? jsonEncode(trip.route!.toJson()) : null,
+        'lastUpdated': trip.lastUpdated.toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [trip.id],
+    );
 
-    return maps
-        .map((map) => Trip(
-              id: map['id'] as String,
-              title: map['title'] as String,
-              routeId: map['routeId'] as String,
-              status: TripStatus.values.firstWhere(
-                (e) => e.toString().split('.').last == map['status'],
-                orElse: () => TripStatus.planned,
-              ),
-              startTime: map['startTime'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch(map['startTime'] as int)
-                  : null,
-              endTime: map['endTime'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch(map['endTime'] as int)
-                  : null,
-              actualDuration: map['actualDuration'] != null
-                  ? Duration(seconds: map['actualDuration'] as int)
-                  : null,
-              progress: map['progress'] as double,
-              currentStopIndex: map['currentStopIndex'] as int,
-              lastUpdated: DateTime.fromMillisecondsSinceEpoch(
-                  map['lastUpdated'] as int),
-              notes: map['notes'] as String?,
-            ))
-        .toList();
+    // Update stops
+    await db.delete('stops', where: 'tripId = ?', whereArgs: [trip.id]);
+    if (trip.stops != null) {
+      for (final stop in trip.stops!) {
+        await insertStop(trip.id, stop);
+      }
+    }
   }
-
-  // Add these missing methods
-  Future<List<Trip>> getAllTrips() => getTrips();
 
   Future<void> deleteTrip(String tripId) async {
     final db = await database;
@@ -247,149 +149,249 @@ class DatabaseService {
     );
   }
 
-  Future<void> updateTrip(Trip trip) async {
-    await saveTrip(trip);
-  }
-
-  Future<void> insertTrip(Trip trip) async {
-    await saveTrip(trip);
-  }
-
-  // Helper methods for stops
-  Future<void> _saveStopsForRoute(String routeId, List<Stop> stops) async {
+  Future<List<Trip>> getAllTrips() async {
     final db = await database;
+    final trips = await db.query('trips', orderBy: 'lastUpdated DESC');
 
-    // Delete existing stops
-    await db.delete('stops', where: 'routeId = ?', whereArgs: [routeId]);
+    return Future.wait(trips.map((tripMap) async {
+      final tripId = tripMap['id'] as String;
+      final stops = await getStopsForTrip(tripId);
 
-    // Insert new stops
-    for (var stop in stops) {
-      await db.insert('stops', {
-        'id': stop.id,
-        'routeId': routeId,
-        'name': stop.name,
-        'type': stop.stopType.toString().split('.').last,
-        'latitude': stop.location.latitude,
-        'longitude': stop.location.longitude,
-        'orderIndex': stop.order,
-        'estimatedDuration': stop.estimatedDuration.inMinutes,
-        'notes': stop.notes,
-        'stopData': _getStopData(stop),
-      });
-    }
+      return Trip(
+        id: tripId,
+        title: tripMap['title'] as String,
+        status: TripStatus.values.firstWhere(
+          (s) => s.toString().split('.').last == tripMap['status'],
+        ),
+        startedAt: tripMap['startedAt'] != null
+            ? DateTime.parse(tripMap['startedAt'] as String)
+            : null,
+        completedAt: tripMap['completedAt'] != null
+            ? DateTime.parse(tripMap['completedAt'] as String)
+            : null,
+        totalDistance: tripMap['totalDistance'] as double?,
+        totalDuration: tripMap['totalDuration'] != null
+            ? Duration(seconds: tripMap['totalDuration'] as int)
+            : null,
+        stops: stops,
+        lastUpdated: DateTime.parse(tripMap['lastUpdated'] as String),
+      );
+    }));
   }
 
-  Future<List<Stop>> _getStopsForRoute(String routeId) async {
+  Future<Trip?> getTripById(String tripId) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'stops',
-      where: 'routeId = ?',
-      whereArgs: [routeId],
-      orderBy: 'orderIndex',
+    final trips = await db.query(
+      'trips',
+      where: 'id = ?',
+      whereArgs: [tripId],
     );
 
-    return maps.map((map) {
-      final type = StopType.values.firstWhere(
-        (e) => e.toString().split('.').last == map['type'],
+    if (trips.isEmpty) return null;
+
+    final tripMap = trips.first;
+    final stops = await getStopsForTrip(tripId);
+
+    return Trip(
+      id: tripId,
+      title: tripMap['title'] as String,
+      status: TripStatus.values.firstWhere(
+        (s) => s.toString().split('.').last == tripMap['status'],
+      ),
+      startedAt: tripMap['startedAt'] != null
+          ? DateTime.parse(tripMap['startedAt'] as String)
+          : null,
+      completedAt: tripMap['completedAt'] != null
+          ? DateTime.parse(tripMap['completedAt'] as String)
+          : null,
+      totalDistance: tripMap['totalDistance'] as double?,
+      totalDuration: tripMap['totalDuration'] != null
+          ? Duration(seconds: tripMap['totalDuration'] as int)
+          : null,
+      stops: stops,
+      lastUpdated: DateTime.parse(tripMap['lastUpdated'] as String),
+    );
+  }
+
+  // Stop methods
+  Future<void> insertStop(String tripId, Stop stop) async {
+    final db = await database;
+
+    String stopType = 'place';
+    if (stop is FoodStop) {
+      stopType = 'food';
+    } else if (stop is FuelStop) {
+      stopType = 'fuel';
+    }
+
+    await db.insert(
+      'stops',
+      {
+        'id': stop.id,
+        'tripId': tripId,
+        'name': stop.name,
+        'location': jsonEncode(stop.location.toJson()),
+        'order_index': stop.order,
+        'estimatedDuration': stop.estimatedDuration?.inMinutes,
+        'timeWindow': stop.timeWindow != null
+            ? jsonEncode(stop.timeWindow!.toJson())
+            : null,
+        'notes': stop.notes,
+        'type': stopType,
+      },
+    );
+  }
+
+  Future<List<Stop>> getStopsForTrip(String tripId) async {
+    final db = await database;
+    final stops = await db.query(
+      'stops',
+      where: 'tripId = ?',
+      whereArgs: [tripId],
+      orderBy: 'order_index ASC',
+    );
+
+    return stops.map((stopMap) {
+      final location = jsonDecode(stopMap['location'] as String);
+      final timeWindow = stopMap['timeWindow'] != null
+          ? jsonDecode(stopMap['timeWindow'] as String)
+          : null;
+
+      final baseStop = Stop(
+        id: stopMap['id'] as String,
+        name: stopMap['name'] as String,
+        location: LatLng(
+          location['latitude'] as double,
+          location['longitude'] as double,
+        ),
+        order: stopMap['order_index'] as int,
+        estimatedDuration: stopMap['estimatedDuration'] != null
+            ? Duration(minutes: stopMap['estimatedDuration'] as int)
+            : null,
+        timeWindow: timeWindow != null
+            ? TimeWindow(
+                earliest: DateTime.parse(timeWindow['earliest']),
+                latest: DateTime.parse(timeWindow['latest']),
+                preferred: DateTime.parse(timeWindow['preferred']),
+              )
+            : null,
+        notes: stopMap['notes'] as String?,
       );
 
-      final location = LatLng(
-        map['latitude'] as double,
-        map['longitude'] as double,
-      );
+      final stopType = stopMap['type'] as String;
 
-      switch (type) {
-        case StopType.place:
-          return PlaceStop(
-            id: map['id'] as String,
-            name: map['name'] as String,
-            location: location,
-            order: map['orderIndex'] as int,
-            placeType: PlaceType.other,
-            estimatedDuration:
-                Duration(minutes: map['estimatedDuration'] as int),
-            notes: map['notes'] as String?,
-          );
-        case StopType.food:
-          // Parse food stop data
-          return FoodStop(
-            id: map['id'] as String,
-            name: map['name'] as String,
-            location: location,
-            order: map['orderIndex'] as int,
-            mealType: MealType.breakfast, // Default, should parse from stopData
-            estimatedDuration:
-                Duration(minutes: map['estimatedDuration'] as int),
-            notes: map['notes'] as String?,
-          );
-        case StopType.fuel:
-          return FuelStop(
-            id: map['id'] as String,
-            name: map['name'] as String,
-            location: location,
-            order: map['orderIndex'] as int,
-            fuelLevel: 0.5, // Default, should parse from stopData
-            estimatedDuration:
-                Duration(minutes: map['estimatedDuration'] as int),
-            notes: map['notes'] as String?,
-          );
-        default:
-          return PlaceStop(
-            id: map['id'] as String,
-            name: map['name'] as String,
-            location: location,
-            order: map['orderIndex'] as int,
-            placeType: PlaceType.other,
-            estimatedDuration:
-                Duration(minutes: map['estimatedDuration'] as int),
-            notes: map['notes'] as String?,
-          );
+      if (stopType == 'food') {
+        return FoodStop(
+          id: baseStop.id,
+          name: baseStop.name,
+          location: baseStop.location,
+          order: baseStop.order,
+          estimatedDuration: baseStop.estimatedDuration,
+          timeWindow: baseStop.timeWindow,
+          notes: baseStop.notes,
+          mealType:
+              MealType.lunch, // Default value, you might want to store this
+          cuisine: '',
+          priceLevel: 2,
+        );
+      } else if (stopType == 'fuel') {
+        return FuelStop(
+          id: baseStop.id,
+          name: baseStop.name,
+          location: baseStop.location,
+          order: baseStop.order,
+          estimatedDuration: baseStop.estimatedDuration,
+          timeWindow: baseStop.timeWindow,
+          notes: baseStop.notes,
+          fuelType: 'regular',
+          currentPrice: 0.0,
+          brand: '',
+        );
       }
+
+      return baseStop;
     }).toList();
   }
 
-  String _getStopData(Stop stop) {
-    if (stop is FoodStop) {
-      return '${stop.mealType.toString().split('.').last},${stop.preferences.join(',')}';
-    } else if (stop is FuelStop) {
-      return '${stop.fuelLevel},${stop.brand},${stop.pricePerGallon}';
-    }
-    return '';
-  }
-
-  // Settings methods
-  Future<Settings> getSettings() async {
+  // Favorite route methods
+  Future<void> insertFavoriteRoute(FavoriteRoute route) async {
     final db = await database;
-    final maps = await db.query('settings', limit: 1);
-
-    if (maps.isEmpty) {
-      // Return default settings
-      return Settings();
-    }
-
-    final map = maps.first;
-    return Settings(
-      theme: map['theme'] as String,
-      notifications: map['notifications'] == 1,
-      autoSave: map['autoSave'] == 1,
-      defaultMapType: map['defaultMapType'] as String,
-      unitSystem: map['unitSystem'] as String,
-    );
-  }
-
-  Future<void> updateSettings(Settings settings) async {
-    final db = await database;
-    await db.update(
-      'settings',
+    await db.insert(
+      'favorite_routes',
       {
-        'theme': settings.theme,
-        'notifications': settings.notifications ? 1 : 0,
-        'autoSave': settings.autoSave ? 1 : 0,
-        'defaultMapType': settings.defaultMapType,
-        'unitSystem': settings.unitSystem,
+        'id': route.id,
+        'name': route.name,
+        'routeData': jsonEncode(route.routeData.toJson()),
+        'lastUsed': route.lastUsed?.toIso8601String(),
+        'useCount': route.useCount,
       },
-      where: 'id = ?',
-      whereArgs: [1],
     );
+  }
+
+  Future<List<FavoriteRoute>> getAllFavoriteRoutes() async {
+    final db = await database;
+    final routes = await db.query('favorite_routes', orderBy: 'lastUsed DESC');
+
+    return routes.map((routeMap) {
+      return FavoriteRoute(
+        id: routeMap['id'] as String,
+        name: routeMap['name'] as String,
+        routeData: UserRoute.fromJson(
+          jsonDecode(routeMap['routeData'] as String),
+        ),
+        lastUsed: routeMap['lastUsed'] != null
+            ? DateTime.parse(routeMap['lastUsed'] as String)
+            : null,
+        useCount: routeMap['useCount'] as int,
+      );
+    }).toList();
+  }
+
+  // Route template methods
+  Future<void> insertRouteTemplate(RouteTemplate template) async {
+    final db = await database;
+    await db.insert(
+      'route_templates',
+      {
+        'id': template.id,
+        'name': template.name,
+        'stops': jsonEncode(template.stops.map((s) => s.toJson()).toList()),
+        'preferences': template.preferences != null
+            ? jsonEncode({
+                'avoidTolls': template.preferences!.avoidTolls,
+                'avoidHighways': template.preferences!.avoidHighways,
+                'preferScenic': template.preferences!.preferScenic,
+              })
+            : null,
+        'createdAt': template.createdAt.toIso8601String(),
+      },
+    );
+  }
+
+  Future<List<RouteTemplate>> getAllRouteTemplates() async {
+    final db = await database;
+    final templates =
+        await db.query('route_templates', orderBy: 'createdAt DESC');
+
+    return templates.map((templateMap) {
+      final stopsJson = jsonDecode(templateMap['stops'] as String) as List;
+      final preferencesJson = templateMap['preferences'] != null
+          ? jsonDecode(templateMap['preferences'] as String)
+          : null;
+
+      return RouteTemplate(
+        id: templateMap['id'] as String,
+        name: templateMap['name'] as String,
+        stops: stopsJson.map((s) => Stop.fromJson(s)).toList(),
+        preferences: preferencesJson != null
+            ? RoutePreferences(
+                avoidTolls: preferencesJson['avoidTolls'] ?? false,
+                avoidHighways: preferencesJson['avoidHighways'] ?? false,
+                preferScenic: preferencesJson['preferScenic'] ?? false,
+              )
+            : null,
+        createdAt: DateTime.parse(templateMap['createdAt'] as String),
+      );
+    }).toList();
   }
 }
