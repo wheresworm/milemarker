@@ -1,208 +1,160 @@
-import 'dart:math' as math;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/fuel_stop.dart';
-import '../models/place.dart';
-import '../models/stop.dart';
 import '../models/user_route.dart';
-import '../models/vehicle_profile.dart';
-import 'places_service.dart';
+import '../models/vehicle.dart';
+import './places_service.dart';
 
 class FuelPlanningService {
   final PlacesService _placesService;
 
-  FuelPlanningService({required PlacesService placesService})
-      : _placesService = placesService;
+  FuelPlanningService({
+    required PlacesService placesService,
+  }) : _placesService = placesService;
 
-  Future<List<FuelStop>> calculateFuelStops({
+  Future<List<FuelStop>> suggestFuelStops({
     required UserRoute route,
-    required VehicleProfile vehicleProfile,
+    required Vehicle vehicle,
+    required double currentFuelLevel,
+    double maxDetourDistance = 5.0, // km
   }) async {
     final fuelStops = <FuelStop>[];
 
-    // Calculate total distance needed
-    final totalDistance = route.totalDistance;
-    final rangePerTank = _calculateRange(vehicleProfile);
+    // Calculate fuel consumption per km
+    final fuelConsumptionPerKm = vehicle.fuelConsumption / 100;
 
-    // Never let user go below 1/4 tank
-    final safeRange = rangePerTank * 0.75;
+    // Calculate range with current fuel
+    double remainingRange = currentFuelLevel / fuelConsumptionPerKm;
 
-    // Calculate number of fuel stops needed
-    final numStops = (totalDistance / safeRange).ceil();
+    // Never let fuel drop below 25% of tank capacity
+    final minFuelLevel = vehicle.tankCapacity * 0.25;
+    final usableRange =
+        (currentFuelLevel - minFuelLevel) / fuelConsumptionPerKm;
 
-    if (numStops <= 0) return fuelStops;
+    double coveredDistance = 0;
 
-    // Divide route into segments
-    final segmentDistance = totalDistance / (numStops + 1);
-    double currentDistance = 0;
-
-    for (int i = 0; i < numStops; i++) {
-      currentDistance += segmentDistance;
-
-      // Find point on route at this distance
-      final pointOnRoute = _getPointAtDistance(
-        route.polylinePoints,
-        currentDistance,
-        totalDistance,
+    // Go through the route and find where we need fuel
+    for (int i = 0; i < route.polylinePoints.length - 1; i++) {
+      final segment = _calculateDistance(
+        route.polylinePoints[i],
+        route.polylinePoints[i + 1],
       );
 
-      if (pointOnRoute != null) {
+      if (coveredDistance + segment > usableRange) {
+        // Need fuel before this segment
+        final fuelStopLocation = route.polylinePoints[i];
+
         // Search for gas stations near this point
-        final nearbyStations = await _placesService.searchAlongRoute(
-          routePoints: [pointOnRoute], // Just search around this point
-          type: PlaceType.gasStation,
-          maxDetourMeters: 5000,
+        final gasStations = await _placesService.searchPlaces(
+          'gas station',
+          location: fuelStopLocation,
+          radiusMeters: (maxDetourDistance * 1000).round(),
         );
 
-        // Filter by preferred brands if any
-        final filteredStations = _filterByPreferences(
-          nearbyStations,
-          vehicleProfile.preferredGasStations ?? [],
-        );
+        if (gasStations.isNotEmpty) {
+          final station = gasStations.first;
 
-        // Find best station (closest to route)
-        if (filteredStations.isNotEmpty) {
-          final bestStation = filteredStations.reduce((a, b) =>
-              (a.distanceFromRoute ?? double.infinity) <
-                      (b.distanceFromRoute ?? double.infinity)
-                  ? a
-                  : b);
+          // Calculate how much fuel is needed
+          final fuelUsedToHere = coveredDistance * fuelConsumptionPerKm;
+          final fuelLevelAtStop = currentFuelLevel - fuelUsedToHere;
+          final gallonsNeeded = vehicle.tankCapacity - fuelLevelAtStop;
 
-          fuelStops.add(FuelStop(
-            name: bestStation.name,
-            location: bestStation.location,
-            placeId: bestStation.placeId,
-            gallonsNeeded: vehicleProfile.tankSize * 0.75,
-            order: route.stops.length + i,
-          ));
+          final fuelStop = FuelStop(
+            id: 'fuel_${DateTime.now().millisecondsSinceEpoch}',
+            name: station.name,
+            location: station.location,
+            order: i,
+            placeId: station.placeId,
+            fuelLevel: fuelLevelAtStop,
+            gallonsNeeded: gallonsNeeded,
+            fuelType: vehicle.preferredFuelType,
+            currentPrice: 3.50, // Placeholder price
+            brand: _extractBrand(station.name),
+            estimatedDuration: const Duration(minutes: 10),
+          );
+
+          fuelStops.add(fuelStop);
+
+          // Reset for next segment
+          coveredDistance = 0;
+          remainingRange =
+              (vehicle.tankCapacity - minFuelLevel) / fuelConsumptionPerKm;
         }
       }
+
+      coveredDistance += segment;
+      remainingRange -= segment;
     }
 
     return fuelStops;
   }
 
-  double _calculateRange(VehicleProfile profile) {
-    return profile.tankSize * profile.mpg;
-  }
+  String _extractBrand(String stationName) {
+    final brands = [
+      'Shell',
+      'Chevron',
+      'BP',
+      'Exxon',
+      'Mobil',
+      'Texaco',
+      'Sunoco',
+      'Marathon',
+      'Circle K',
+      '7-Eleven',
+    ];
 
-  LatLng? _getPointAtDistance(
-    List<LatLng> points,
-    double targetDistance,
-    double totalDistance,
-  ) {
-    if (points.isEmpty) return null;
-
-    double currentDistance = 0;
-
-    for (int i = 0; i < points.length - 1; i++) {
-      final segmentDistance = _calculateDistance(points[i], points[i + 1]);
-
-      if (currentDistance + segmentDistance >= targetDistance) {
-        // Interpolate position on this segment
-        final ratio = (targetDistance - currentDistance) / segmentDistance;
-
-        return LatLng(
-          points[i].latitude +
-              (points[i + 1].latitude - points[i].latitude) * ratio,
-          points[i].longitude +
-              (points[i + 1].longitude - points[i].longitude) * ratio,
-        );
+    for (final brand in brands) {
+      if (stationName.toLowerCase().contains(brand.toLowerCase())) {
+        return brand;
       }
-
-      currentDistance += segmentDistance;
     }
 
-    return points.last;
+    return stationName.split(' ').first;
   }
 
-  double _calculateDistance(LatLng p1, LatLng p2) {
-    const double earthRadius = 6371000; // meters
-    final double lat1Rad = p1.latitude * (math.pi / 180);
-    final double lat2Rad = p2.latitude * (math.pi / 180);
-    final double deltaLat = (p2.latitude - p1.latitude) * (math.pi / 180);
-    final double deltaLng = (p2.longitude - p1.longitude) * (math.pi / 180);
+  double _calculateDistance(LatLng point1, LatLng point2) {
+    const double earthRadius = 6371; // km
+    final double lat1Rad = point1.latitude * (3.14159 / 180);
+    final double lat2Rad = point2.latitude * (3.14159 / 180);
+    final double deltaLat =
+        (point2.latitude - point1.latitude) * (3.14159 / 180);
+    final double deltaLng =
+        (point2.longitude - point1.longitude) * (3.14159 / 180);
 
-    final double a = math.sin(deltaLat / 2) * math.sin(deltaLat / 2) +
-        math.cos(lat1Rad) *
-            math.cos(lat2Rad) *
-            math.sin(deltaLng / 2) *
-            math.sin(deltaLng / 2);
+    final double a = (Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)) +
+        (Math.cos(lat1Rad) *
+            Math.cos(lat2Rad) *
+            Math.sin(deltaLng / 2) *
+            Math.sin(deltaLng / 2));
 
-    final double c = 2 * math.asin(math.sqrt(a));
+    final double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return earthRadius * c / 1609.344; // Convert to miles
+    return earthRadius * c;
   }
 
-  List<Place> _filterByPreferences(
-    List<Place> stations,
-    List<String> preferredBrands,
-  ) {
-    if (preferredBrands.isEmpty) return stations;
-
-    // First try to find preferred brands
-    final preferredStations = stations.where((station) {
-      final name = station.name.toLowerCase();
-      return preferredBrands.any((brand) => name.contains(brand.toLowerCase()));
-    }).toList();
-
-    // If found, return only preferred; otherwise return all
-    return preferredStations.isNotEmpty ? preferredStations : stations;
-  }
-
-  Future<List<PossibleAmenity>> suggestAmenities({
-    required List<Stop> stops,
-    required VehicleProfile vehicleProfile,
+  // Add method to find specific fuel brands
+  Future<List<FuelStop>> findPreferredBrandStations({
+    required LatLng location,
+    required String brand,
+    double radiusKm = 10.0,
   }) async {
-    final amenities = <PossibleAmenity>[];
+    final results = await _placesService.searchPlaces(
+      '$brand gas station',
+      location: location,
+      radiusMeters: (radiusKm * 1000).round(),
+    );
 
-    // For each fuel stop, suggest nearby amenities
-    for (final stop in stops) {
-      if (stop is FuelStop) {
-        // Search for convenience stores, restaurants nearby
-        final nearbyPlaces = await _placesService.searchPlaces(
-          query: 'convenience store restaurant',
-          location: stop.location,
-          radiusMeters: 1000,
-        );
-
-        for (final place in nearbyPlaces) {
-          amenities.add(PossibleAmenity(
-            name: place.name,
-            location: place.location,
-            type: _getAmenityType(place.type),
-            associatedStopId: stop.id,
-          ));
-        }
-      }
-    }
-
-    return amenities;
-  }
-
-  AmenityType _getAmenityType(PlaceType placeType) {
-    switch (placeType) {
-      case PlaceType.restaurant:
-        return AmenityType.food;
-      case PlaceType.convenienceStore:
-        return AmenityType.restroom;
-      default:
-        return AmenityType.rest;
-    }
+    return results
+        .map((place) => FuelStop(
+              id: 'fuel_${place.placeId}',
+              name: place.name,
+              location: place.location,
+              order: 0,
+              placeId: place.placeId,
+              fuelType: 'regular',
+              currentPrice: 3.50, // Placeholder
+              brand: brand,
+              estimatedDuration: const Duration(minutes: 10),
+            ))
+        .toList();
   }
 }
-
-class PossibleAmenity {
-  final String name;
-  final LatLng location;
-  final AmenityType type;
-  final String associatedStopId;
-
-  PossibleAmenity({
-    required this.name,
-    required this.location,
-    required this.type,
-    required this.associatedStopId,
-  });
-}
-
-enum AmenityType { restroom, food, rest }
