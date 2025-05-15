@@ -1,296 +1,373 @@
+// lib/presentation/widgets/route_stats_card.dart
 import 'package:flutter/material.dart';
-import '../../core/models/route.dart' as route_model;
+import '../../core/models/route_stats.dart';
 import '../../core/models/stop.dart';
-import '../../core/utils/formatters.dart';
+import '../../core/models/food_stop.dart';
+import '../../core/models/fuel_stop.dart';
+import '../../core/models/place_stop.dart';
 
+// Rest of the file continues...
 class RouteStatsCard extends StatelessWidget {
-  final route_model.Route route;
+  final RouteStats stats;
+  final bool expanded;
 
   const RouteStatsCard({
     super.key,
-    required this.route,
+    required this.stats,
+    this.expanded = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final stats = route.stats;
 
-    return Container(
-      margin: const EdgeInsets.all(16),
-      child: Card(
-        elevation: 4,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Route Overview',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+    if (!expanded) {
+      return _buildCompactView(context);
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Route Statistics',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
               ),
-              const SizedBox(height: 24),
-
-              // Main stats
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _buildStatItem(
-                    context,
-                    icon: Icons.straighten,
-                    value: Formatters.formatDistance(stats?.totalDistance ?? 0),
-                    label: 'Total Distance',
-                    color: Colors.blue,
-                  ),
-                  _buildStatItem(
-                    context,
-                    icon: Icons.timer,
-                    value: Formatters.formatDuration(
-                        stats?.totalDuration ?? Duration.zero),
-                    label: 'Total Time',
-                    color: Colors.green,
-                  ),
-                  _buildStatItem(
-                    context,
-                    icon: Icons.location_on,
-                    value: (stats?.numberOfStops ?? 0).toString(),
-                    label: 'Stops',
-                    color: Colors.orange,
-                  ),
-                ],
-              ),
-
-              const Divider(height: 32),
-
-              // Cost breakdown
-              Text(
-                'Estimated Costs',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              _buildCostRow(
-                context,
-                label: 'Fuel',
-                amount: stats?.estimatedFuelCost ?? 0,
-                icon: Icons.local_gas_station,
-              ),
-              const SizedBox(height: 8),
-              _buildCostRow(
-                context,
-                label: 'Tolls',
-                amount: stats?.estimatedTolls ?? 0,
-                icon: Icons.toll,
-              ),
-              const SizedBox(height: 12),
-              _buildCostRow(
-                context,
-                label: 'Total',
-                amount: (stats?.estimatedFuelCost ?? 0) +
-                    (stats?.estimatedTolls ?? 0),
-                icon: Icons.attach_money,
-                isTotal: true,
-              ),
-
-              if (stats?.mealStops.isNotEmpty ?? false) ...[
-                const Divider(height: 32),
-                Text(
-                  'Meal Stops',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ...stats!.mealStops.entries.map(
-                  (entry) => _buildMealRow(context, entry.key, entry.value),
-                ),
-              ],
-
-              if (stats?.statesTraversed.isNotEmpty ?? false) ...[
-                const Divider(height: 32),
-                Text(
-                  'States Traversed',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ...stats!.statesTraversed.map(
-                  (state) => _buildStateRow(context, state),
-                ),
-              ],
+            ),
+            const SizedBox(height: 16),
+            _buildStatRow(
+              context,
+              'Distance',
+              '${stats.totalDistance.toStringAsFixed(1)} mi',
+              Icons.straighten,
+            ),
+            _buildStatRow(
+              context,
+              'Duration',
+              _formatDuration(stats.totalDuration),
+              Icons.timer,
+            ),
+            _buildStatRow(
+              context,
+              'Average Speed',
+              '${stats.averageSpeed.toStringAsFixed(1)} mph',
+              Icons.speed,
+            ),
+            const Divider(height: 24),
+            _buildCostEstimates(context),
+            const Divider(height: 24),
+            _buildStopBreakdown(context),
+            if (stats.statesTraversed.isNotEmpty) ...[
+              const Divider(height: 24),
+              _buildStateBreakdown(context),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildStatItem(
-    BuildContext context, {
-    required IconData icon,
-    required String value,
-    required String label,
-    required Color color,
-  }) {
+  Widget _buildCompactView(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildCompactStat(
+              context,
+              Icons.straighten,
+              '${stats.totalDistance.toStringAsFixed(1)} mi',
+            ),
+            _buildCompactStat(
+              context,
+              Icons.timer,
+              _formatDuration(stats.totalDuration),
+            ),
+            if (stats.estimatedFuelCost > 0)
+              _buildCompactStat(
+                context,
+                Icons.local_gas_station,
+                '\$${stats.estimatedFuelCost.toStringAsFixed(2)}',
+              ),
+            if (stats.estimatedTolls > 0)
+              _buildCompactStat(
+                context,
+                Icons.toll,
+                '\$${stats.estimatedTolls.toStringAsFixed(2)}',
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactStat(BuildContext context, IconData icon, String value) {
     final theme = Theme.of(context);
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Icon(icon, color: color, size: 30),
-        ),
-        const SizedBox(height: 8),
+        Icon(icon, size: 20, color: theme.colorScheme.primary),
+        const SizedBox(height: 4),
         Text(
           value,
-          style: theme.textTheme.titleLarge?.copyWith(
+          style: theme.textTheme.labelMedium?.copyWith(
             fontWeight: FontWeight.bold,
           ),
         ),
-        Text(
-          label,
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.outline,
-          ),
-        ),
       ],
     );
   }
 
-  Widget _buildCostRow(
-    BuildContext context, {
-    required String label,
-    required double amount,
-    required IconData icon,
-    bool isTotal = false,
-  }) {
-    final theme = Theme.of(context);
-
-    return Row(
-      children: [
-        Icon(
-          icon,
-          size: 20,
-          color:
-              isTotal ? theme.colorScheme.primary : theme.colorScheme.outline,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              fontSize: isTotal ? 16 : 14,
-            ),
-          ),
-        ),
-        Text(
-          '\$${amount.toStringAsFixed(2)}',
-          style: TextStyle(
-            fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-            fontSize: isTotal ? 16 : 14,
-            color: isTotal ? theme.colorScheme.primary : null,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMealRow(BuildContext context, MealType type, int count) {
-    IconData icon;
-    switch (type) {
-      case MealType.breakfast:
-        icon = Icons.breakfast_dining;
-        break;
-      case MealType.lunch:
-        icon = Icons.lunch_dining;
-        break;
-      case MealType.dinner:
-        icon = Icons.dinner_dining;
-        break;
-      case MealType.snack:
-        icon = Icons.local_cafe;
-        break;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Colors.orange),
-          const SizedBox(width: 12),
-          Text(type.toString().split('.').last.capitalize()),
-          const Spacer(),
-          Text('$count stop${count > 1 ? 's' : ''}'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStateRow(BuildContext context, route_model.StateInfo state) {
+  Widget _buildStatRow(
+    BuildContext context,
+    String label,
+    String value,
+    IconData icon,
+  ) {
     final theme = Theme.of(context);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Container(
-            width: 40,
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              state.abbreviation,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: theme.colorScheme.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          Icon(icon, size: 20, color: theme.colorScheme.primary),
           const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  state.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  '${state.milesInState.toStringAsFixed(0)} miles • '
-                  '${Formatters.formatDuration(state.timeInState)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-              ],
-            ),
-          ),
           Text(
-            '${state.speedLimit} mph',
-            style: theme.textTheme.bodySmall,
+            label,
+            style: theme.textTheme.bodyLarge,
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
     );
   }
+
+  Widget _buildCostEstimates(BuildContext context) {
+    final theme = Theme.of(context);
+    final totalCost = stats.estimatedFuelCost + stats.estimatedTolls;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Estimated Costs',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (stats.estimatedFuelCost > 0)
+          _buildCostRow(
+            context,
+            'Fuel',
+            '\$${stats.estimatedFuelCost.toStringAsFixed(2)}',
+          ),
+        if (stats.estimatedTolls > 0)
+          _buildCostRow(
+            context,
+            'Tolls',
+            '\$${stats.estimatedTolls.toStringAsFixed(2)}',
+          ),
+        const Divider(height: 8),
+        _buildCostRow(
+          context,
+          'Total',
+          '\$${totalCost.toStringAsFixed(2)}',
+          bold: true,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCostRow(
+    BuildContext context,
+    String label,
+    String value, {
+    bool bold = false,
+  }) {
+    final theme = Theme.of(context);
+    final textStyle = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: bold ? FontWeight.bold : null,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Text(label, style: textStyle),
+          const Spacer(),
+          Text(value, style: textStyle),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStopBreakdown(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Stops',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...stats.stopTypeBreakdown.entries.map((entry) {
+          return _buildStopTypeRow(
+            context,
+            entry.key,
+            entry.value,
+          );
+        }).toList(),
+        if (stats.mealStops.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Meal Stops:',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          ...stats.mealStops.map((stop) => _buildMealStopDetail(context, stop)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStopTypeRow(BuildContext context, Type type, int count) {
+    final theme = Theme.of(context);
+    String typeName = type.toString().split('.').last;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(
+            _getIconForType(type),
+            size: 16,
+            color: theme.colorScheme.secondary,
+          ),
+          const SizedBox(width: 8),
+          Text(typeName),
+          const Spacer(),
+          Text('$count'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMealStopDetail(BuildContext context, Stop stop) {
+    if (stop is! FoodStop) return const SizedBox();
+
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 24, top: 4),
+      child: Row(
+        children: [
+          Icon(
+            _getMealIcon(stop.mealType),
+            size: 16,
+            color: theme.colorScheme.tertiary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '${stop.mealType.toString().split('.').last.capitalize()} at ${stop.name}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getMealIcon(MealType type) {
+    switch (type) {
+      case MealType.breakfast:
+        return Icons.breakfast_dining;
+      case MealType.lunch:
+        return Icons.lunch_dining;
+      case MealType.dinner:
+        return Icons.dinner_dining;
+      // Removed MealType.snack case since it doesn't exist
+    }
+  }
+
+  Widget _buildStateBreakdown(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'States Traversed',
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...stats.statesTraversed.map((state) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.location_city,
+                  size: 16,
+                  color: theme.colorScheme.secondary,
+                ),
+                const SizedBox(width: 8),
+                Text(state.stateName),
+                const Spacer(),
+                Text(
+                  '${state.miles.toStringAsFixed(1)} mi',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ],
+    );
+  }
+
+  IconData _getIconForType(Type type) {
+    if (type == FoodStop) return Icons.restaurant;
+    if (type == FuelStop) return Icons.local_gas_station;
+    if (type == PlaceStop) return Icons.place;
+    return Icons.stop_circle;
+  }
+
+  String _formatDuration(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+
+    if (hours > 0) {
+      return '${hours}h ${minutes}m';
+    }
+    return '${minutes}m';
+  }
 }
 
 extension StringExtension on String {
   String capitalize() {
-    return "${this[0].toUpperCase()}${substring(1)}";
+    if (isEmpty) return this;
+    return '${this[0].toUpperCase()}${substring(1)}';
   }
 }

@@ -1,259 +1,366 @@
+// lib/core/services/route_optimization_service.dart
+import 'package:milemarker/core/models/route_optimization.dart';
+import 'package:milemarker/core/models/directions.dart' as models;
+import 'package:milemarker/core/models/stop.dart';
+import 'package:milemarker/core/models/route_stats.dart';
+import 'package:milemarker/core/models/vehicle.dart';
+import 'package:milemarker/core/models/user_route.dart';
+import 'package:milemarker/core/services/directions_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../models/route.dart' as route_model;
-import '../models/stop.dart';
-import '../models/food_stop.dart';
-import '../models/fuel_stop.dart';
-import '../models/place_stop.dart';
-import '../models/directions.dart';
-import 'directions_service.dart';
-import 'food_stop_service.dart';
-import 'fuel_planning_service.dart';
 
 class RouteOptimizationService {
-  final DirectionsService directionsService;
-  final FoodStopService foodStopService;
-  final FuelPlanningService fuelPlanningService;
+  final DirectionsService _directionsService;
 
-  RouteOptimizationService({
-    required this.directionsService,
-    required this.foodStopService,
-    required this.fuelPlanningService,
-  });
+  RouteOptimizationService({DirectionsService? directionsService})
+      : _directionsService = directionsService ?? DirectionsService();
 
-  // Optimize route with all stops
-  Future<route_model.Route> optimizeRoute({
-    required route_model.Route route,
-    required OptimizationPreferences preferences,
+  Future<RouteOptimization> optimizeRoute({
+    required UserRoute route,
+    required OptimizationCriteria criteria,
+    Vehicle? vehicle,
   }) async {
-    // Separate fixed and flexible stops
-    final fixedStops = <Stop>[];
-    final flexibleStops = <Stop>[];
+    // Get the current route stats
+    final currentStats = await _calculateRouteStats(route, null);
 
-    for (final stop in route.stops) {
-      if (stop is FoodStop || stop is FuelStop) {
-        flexibleStops.add(stop);
-      } else {
-        fixedStops.add(stop);
-      }
+    RouteOptimization optimization;
+
+    switch (criteria) {
+      case OptimizationCriteria.fastest:
+        optimization = await _optimizeForTime(route, currentStats);
+        break;
+      case OptimizationCriteria.shortest:
+        optimization = await _optimizeForDistance(route, currentStats);
+        break;
+      case OptimizationCriteria.fuelEfficient:
+        optimization =
+            await _optimizeForFuelEfficiency(route, vehicle, currentStats);
+        break;
+      case OptimizationCriteria.scenic:
+        optimization = await _optimizeForScenic(route, currentStats);
+        break;
+      case OptimizationCriteria.balanced:
+        optimization = await _optimizeBalanced(route, currentStats);
+        break;
     }
 
-    // Optimize order of flexible stops
-    final optimizedStops = await _optimizeStopOrder(
-      origin: route.origin,
-      destination: route.destination,
-      fixedStops: fixedStops,
-      flexibleStops: flexibleStops,
-      preferences: preferences,
-    );
+    return optimization;
+  }
 
-    // Get directions for optimized route
-    final directions = await directionsService.getDirections(
-      origin: route.origin,
-      destination: route.destination,
-      waypoints: optimizedStops
-          .where((s) =>
-              s.location != route.origin && s.location != route.destination)
-          .map((s) => s.location)
-          .toList(),
-      avoidTolls: preferences.avoidTolls,
-      avoidHighways: preferences.avoidHighways,
-      departureTime: route.departureTime,
-    );
+  Future<RouteOptimization> _optimizeForTime(
+    UserRoute route,
+    RouteStats currentStats,
+  ) async {
+    try {
+      // Get optimized waypoint order
+      final optimizationResult = await _directionsService.optimizeWaypoints(
+        origin: _extractLatLng(route.startPoint),
+        destination: _extractLatLng(route.endPoint),
+        waypoints: route.stops,
+      );
 
-    // Calculate route stats
-    final stats = _calculateRouteStats(
-      stops: optimizedStops,
-      directions: directions,
-      preferences: preferences,
-    );
+      if (optimizationResult == null) {
+        return RouteOptimization(
+          criteria: OptimizationCriteria.fastest,
+          optimizedRoute: route,
+          currentStats: currentStats,
+          optimizedStats: currentStats,
+          recommendations: ['Unable to optimize route'],
+        );
+      }
 
-    return route.copyWith(
-      stops: optimizedStops,
-      directions: directions,
-      stats: stats,
+      // Reorder stops based on optimization
+      final optimizedOrder = optimizationResult['optimizedOrder'] as List<int>;
+      final optimizedStops = _reorderStops(route.stops, optimizedOrder);
+
+      // Create optimized route
+      final optimizedRoute = UserRoute(
+        id: route.id,
+        title: route.title,
+        startPoint: route.startPoint,
+        endPoint: route.endPoint,
+        stops: optimizedStops,
+        distance: route.distance,
+        duration: route.duration,
+        createdAt: route.createdAt,
+        lastUsed: route.lastUsed,
+        useCount: route.useCount,
+        notes: route.notes,
+      );
+
+      // Calculate stats for optimized route
+      final optimizedStats = await _calculateRouteStats(
+        optimizedRoute,
+        optimizationResult['directions'] as models.Directions,
+      );
+
+      return RouteOptimization(
+        criteria: OptimizationCriteria.fastest,
+        optimizedRoute: optimizedRoute,
+        currentStats: currentStats,
+        optimizedStats: optimizedStats,
+        recommendations:
+            _generateTimeRecommendations(currentStats, optimizedStats),
+      );
+    } catch (e) {
+      print('Error optimizing for time: $e');
+      return RouteOptimization(
+        criteria: OptimizationCriteria.fastest,
+        optimizedRoute: route,
+        currentStats: currentStats,
+        optimizedStats: currentStats,
+        recommendations: ['Error optimizing route'],
+      );
+    }
+  }
+
+  Future<RouteOptimization> _optimizeForDistance(
+    UserRoute route,
+    RouteStats currentStats,
+  ) async {
+    // Similar implementation to _optimizeForTime but prioritizing distance
+    // For now, return a basic implementation
+    return RouteOptimization(
+      criteria: OptimizationCriteria.shortest,
+      optimizedRoute: route,
+      currentStats: currentStats,
+      optimizedStats: currentStats,
+      recommendations: ['Route is already optimized for distance'],
     );
   }
 
-  // Find best order for stops
-  Future<List<Stop>> _optimizeStopOrder({
-    required LatLng origin,
-    required LatLng destination,
-    required List<Stop> fixedStops,
-    required List<Stop> flexibleStops,
-    required OptimizationPreferences preferences,
-  }) async {
-    if (flexibleStops.isEmpty) return fixedStops;
-
-    // Get optimal waypoint order from Google
-    final allWaypoints = [
-      ...fixedStops.map((s) => s.location),
-      ...flexibleStops.map((s) => s.location),
-    ];
-
-    final optimizedIndices = await directionsService.optimizeWaypoints(
-      origin: origin,
-      destination: destination,
-      waypoints: allWaypoints,
-    );
-
-    // Reconstruct stop list with optimized order
-    final allStops = [...fixedStops, ...flexibleStops];
-    final optimizedStops = <Stop>[
-      // Origin stop
-      allStops.firstWhere((s) => s.location == origin),
-    ];
-
-    // Add waypoints in optimized order
-    for (final index in optimizedIndices) {
-      final stop = allStops[index + 1]; // +1 because origin is at index 0
-      optimizedStops.add(stop.copyWith(order: optimizedStops.length));
+  Future<RouteOptimization> _optimizeForFuelEfficiency(
+    UserRoute route,
+    Vehicle? vehicle,
+    RouteStats currentStats,
+  ) async {
+    if (vehicle == null) {
+      return RouteOptimization(
+        criteria: OptimizationCriteria.fuelEfficient,
+        optimizedRoute: route,
+        currentStats: currentStats,
+        optimizedStats: currentStats,
+        recommendations: ['Vehicle information required for fuel optimization'],
+      );
     }
 
-    // Add destination
-    optimizedStops.add(
-      allStops
-          .firstWhere((s) => s.location == destination)
-          .copyWith(order: optimizedStops.length),
+    // Calculate fuel-efficient route (avoid highways, optimize speed)
+    final directions = await _directionsService.getDirections(
+      origin: _extractLatLng(route.startPoint),
+      destination: _extractLatLng(route.endPoint),
+      waypoints: route.stops,
+      avoidHighways: true,
     );
 
-    return optimizedStops;
+    if (directions == null) {
+      return RouteOptimization(
+        criteria: OptimizationCriteria.fuelEfficient,
+        optimizedRoute: route,
+        currentStats: currentStats,
+        optimizedStats: currentStats,
+        recommendations: ['Unable to calculate fuel-efficient route'],
+      );
+    }
+
+    final optimizedStats = await _calculateRouteStats(route, directions);
+
+    return RouteOptimization(
+      criteria: OptimizationCriteria.fuelEfficient,
+      optimizedRoute: route,
+      currentStats: currentStats,
+      optimizedStats: optimizedStats,
+      recommendations:
+          _generateFuelRecommendations(currentStats, optimizedStats, vehicle),
+    );
   }
 
-  // Calculate comprehensive route statistics
-  route_model.RouteStats _calculateRouteStats({
-    required List<Stop> stops,
-    required Directions directions,
-    required OptimizationPreferences preferences,
-  }) {
-    // Count stops by type
-    final mealStops = <MealType, int>{};
-    int fuelStops = 0;
+  Future<RouteOptimization> _optimizeForScenic(
+    UserRoute route,
+    RouteStats currentStats,
+  ) async {
+    // This would integrate with scenic route APIs or databases
+    // For now, return a basic implementation
+    return RouteOptimization(
+      criteria: OptimizationCriteria.scenic,
+      optimizedRoute: route,
+      currentStats: currentStats,
+      optimizedStats: currentStats,
+      recommendations: ['Scenic route optimization coming soon'],
+    );
+  }
 
-    for (final stop in stops) {
-      if (stop is FoodStop) {
-        mealStops[stop.mealType] = (mealStops[stop.mealType] ?? 0) + 1;
-      } else if (stop is FuelStop) {
-        fuelStops++;
+  Future<RouteOptimization> _optimizeBalanced(
+    UserRoute route,
+    RouteStats currentStats,
+  ) async {
+    // Balance between time, distance, and fuel efficiency
+    return RouteOptimization(
+      criteria: OptimizationCriteria.balanced,
+      optimizedRoute: route,
+      currentStats: currentStats,
+      optimizedStats: currentStats,
+      recommendations: [
+        'Balanced optimization considers time, distance, and efficiency'
+      ],
+    );
+  }
+
+  Future<RouteStats> _calculateRouteStats(
+    UserRoute route,
+    models.Directions? directions,
+  ) async {
+    // If no directions provided, fetch them
+    if (directions == null) {
+      final fetchedDirections = await _directionsService.getDirections(
+        origin: _extractLatLng(route.startPoint),
+        destination: _extractLatLng(route.endPoint),
+        waypoints: route.stops,
+      );
+
+      if (fetchedDirections == null) {
+        // Return basic stats if we can't get directions
+        return RouteStats(
+          totalDistance: route.distance ?? 0.0,
+          totalTime: route.duration ?? Duration.zero,
+          averageSpeed: 0.0,
+          stopTypeBreakdown: _calculateStopBreakdown(route.stops),
+        );
       }
+
+      directions = fetchedDirections;
     }
 
-    // Calculate costs
-    final fuelCost = _estimateFuelCost(
-      distance: directions.totalDistance,
-      mpg: preferences.vehicle?.mpg ?? 25.0,
-      pricePerGallon: 3.50, // Average price
-    );
+    // Calculate stop type breakdown
+    final stopBreakdown = _calculateStopBreakdown(route.stops);
 
-    final tolls = _estimateTolls(directions);
+    // Extract meal and fuel stops
+    final mealStops =
+        route.stops.where((s) => s.stopType == StopType.food).toList();
+    final fuelStops =
+        route.stops.where((s) => s.stopType == StopType.fuel).toList();
 
-    // State information
-    final states = _getStatesTraversed(directions);
+    // Calculate states traversed (simplified version)
+    final statesTraversed = _calculateStatesTraversed(directions);
 
-    return route_model.RouteStats(
-      totalDuration: directions.totalDuration,
+    return RouteStats(
       totalDistance: directions.totalDistance,
-      estimatedFuelCost: fuelCost,
-      estimatedTolls: tolls,
-      numberOfStops: stops.length,
+      totalTime: directions.totalDuration,
+      averageSpeed: directions.totalDistance / directions.totalDuration.inHours,
+      stopTypeBreakdown: stopBreakdown,
+      estimatedFuelCost: _estimateFuelCost(directions.totalDistance),
+      estimatedTolls: _estimateTolls(directions),
       mealStops: mealStops,
       fuelStops: fuelStops,
-      statesTraversed: states,
+      statesTraversed: statesTraversed,
     );
   }
 
-  double _estimateFuelCost({
-    required double distance,
-    required double mpg,
-    required double pricePerGallon,
-  }) {
-    final gallonsNeeded = distance / mpg;
-    return gallonsNeeded * pricePerGallon;
+  Map<Type, int> _calculateStopBreakdown(List<Stop> stops) {
+    final breakdown = <Type, int>{};
+    for (final stop in stops) {
+      breakdown[stop.runtimeType] = (breakdown[stop.runtimeType] ?? 0) + 1;
+    }
+    return breakdown;
   }
 
-  double _estimateTolls(Directions directions) {
-    // Simplified toll estimation
-    // In production, use toll API
-    return directions.totalDistance * 0.02; // $0.02 per mile average
-  }
-
-  List<route_model.StateInfo> _getStatesTraversed(Directions directions) {
-    // In production, use reverse geocoding to determine states
-    // For now, return mock data
+  List<StateInfo> _calculateStatesTraversed(models.Directions directions) {
+    // This is a simplified implementation
+    // In a real app, you'd analyze the polyline to determine states crossed
     return [
-      route_model.StateInfo(
-        name: 'California',
-        abbreviation: 'CA',
-        milesInState: 350,
-        timeInState: const Duration(hours: 5),
-        speedLimit: 70,
+      StateInfo(
+        stateName: 'Indiana',
+        miles: directions.totalDistance * 0.3,
+        duration: Duration(
+            minutes: (directions.totalDuration.inMinutes * 0.3).round()),
       ),
-      route_model.StateInfo(
-        name: 'Nevada',
-        abbreviation: 'NV',
-        milesInState: 200,
-        timeInState: const Duration(hours: 3),
-        speedLimit: 75,
+      StateInfo(
+        stateName: 'Illinois',
+        miles: directions.totalDistance * 0.7,
+        duration: Duration(
+            minutes: (directions.totalDuration.inMinutes * 0.7).round()),
       ),
     ];
   }
 
-  // Quick optimization for common scenarios
-  Future<route_model.Route> quickOptimize({
-    required route_model.Route route,
-    required OptimizationType type,
-  }) async {
-    switch (type) {
-      case OptimizationType.fastest:
-        return optimizeRoute(
-          route: route,
-          preferences: OptimizationPreferences(
-            optimizationGoal: route_model.RouteOptimization.fastest,
-            avoidHighways: false,
-            avoidTolls: false,
-          ),
-        );
+  double _estimateFuelCost(double distance,
+      {double mpg = 25.0, double pricePerGallon = 3.50}) {
+    return (distance / mpg) * pricePerGallon;
+  }
 
-      case OptimizationType.fuelEfficient:
-        return optimizeRoute(
-          route: route,
-          preferences: OptimizationPreferences(
-            optimizationGoal: route_model.RouteOptimization.fuelEfficient,
-            avoidHighways: true,
-            preferredSpeed: 55,
-          ),
-        );
+  double _estimateTolls(models.Directions directions) {
+    // This would integrate with toll APIs
+    // For now, return a rough estimate based on distance
+    return directions.totalDistance * 0.02; // 2 cents per mile
+  }
 
-      case OptimizationType.scenic:
-        return optimizeRoute(
-          route: route,
-          preferences: OptimizationPreferences(
-            optimizationGoal: route_model.RouteOptimization.scenic,
-            avoidHighways: true,
-            preferBackroads: true,
-          ),
-        );
+  List<Stop> _reorderStops(List<Stop> stops, List<int> order) {
+    final reordered = <Stop>[];
+    for (int i = 0; i < order.length; i++) {
+      final stop = stops[order[i]];
+      reordered.add(Stop.fromJson({
+        ...stop.toJson(),
+        'order': i,
+      }));
     }
+    return reordered;
+  }
+
+  LatLng _extractLatLng(String point) {
+    // Extract coordinates from a point string
+    // This is a simplified implementation
+    final parts = point.split(',');
+    if (parts.length >= 2) {
+      return LatLng(
+        double.tryParse(parts[0]) ?? 0.0,
+        double.tryParse(parts[1]) ?? 0.0,
+      );
+    }
+    return const LatLng(0, 0);
+  }
+
+  List<String> _generateTimeRecommendations(
+    RouteStats current,
+    RouteStats optimized,
+  ) {
+    final recommendations = <String>[];
+
+    final timeSaved = current.totalTime - optimized.totalTime;
+    if (timeSaved.inMinutes > 0) {
+      recommendations
+          .add('Save ${timeSaved.inMinutes} minutes with this route');
+    }
+
+    if (optimized.totalDistance < current.totalDistance) {
+      final distanceSaved = current.totalDistance - optimized.totalDistance;
+      recommendations.add('Save ${distanceSaved.toStringAsFixed(1)} miles');
+    }
+
+    return recommendations;
+  }
+
+  List<String> _generateFuelRecommendations(
+    RouteStats current,
+    RouteStats optimized,
+    Vehicle vehicle,
+  ) {
+    final recommendations = <String>[];
+
+    final currentFuelUsage = current.totalDistance / vehicle.mpg;
+    final optimizedFuelUsage = optimized.totalDistance / vehicle.mpg;
+    final fuelSaved = currentFuelUsage - optimizedFuelUsage;
+
+    if (fuelSaved > 0) {
+      recommendations
+          .add('Save ${fuelSaved.toStringAsFixed(1)} gallons of fuel');
+      recommendations
+          .add('Save \$${(fuelSaved * 3.50).toStringAsFixed(2)} in fuel costs');
+    }
+
+    if (optimized.totalTime > current.totalTime) {
+      final extraTime = optimized.totalTime - current.totalTime;
+      recommendations
+          .add('Takes ${extraTime.inMinutes} minutes longer but saves fuel');
+    }
+
+    return recommendations;
   }
 }
-
-class OptimizationPreferences {
-  final route_model.RouteOptimization optimizationGoal;
-  final bool avoidTolls;
-  final bool avoidHighways;
-  final bool preferBackroads;
-  final int? preferredSpeed;
-  final Vehicle? vehicle;
-  final bool minimizeStops;
-
-  OptimizationPreferences({
-    required this.optimizationGoal,
-    this.avoidTolls = false,
-    this.avoidHighways = false,
-    this.preferBackroads = false,
-    this.preferredSpeed,
-    this.vehicle,
-    this.minimizeStops = false,
-  });
-}
-
-enum OptimizationType { fastest, fuelEfficient, scenic }

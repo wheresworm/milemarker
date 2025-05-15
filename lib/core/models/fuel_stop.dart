@@ -1,21 +1,24 @@
+// lib/core/models/fuel_stop.dart
+import 'package:milemarker/core/models/stop.dart';
+import 'package:milemarker/core/models/time_window.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'stop.dart';
-import 'time_window.dart';
 
 class FuelStop extends Stop {
-  final double gallonsNeeded;
-  final String? placeId;
+  final double fuelLevel;
+  final String brand;
+  final double pricePerGallon;
 
   FuelStop({
-    String? id,
+    required String id,
     required String name,
     required LatLng location,
     required int order,
-    Duration estimatedDuration = const Duration(minutes: 15),
+    required this.fuelLevel,
+    this.brand = 'Any',
+    this.pricePerGallon = 0.0,
+    Duration estimatedDuration = const Duration(minutes: 10),
     TimeWindow? timeWindow,
     String? notes,
-    required this.gallonsNeeded,
-    required this.placeId,
   }) : super(
           id: id,
           name: name,
@@ -24,34 +27,43 @@ class FuelStop extends Stop {
           estimatedDuration: estimatedDuration,
           timeWindow: timeWindow,
           notes: notes,
-          type: StopType.fuel,
         );
 
   @override
+  StopType get stopType => StopType.fuel;
+
+  @override
+  String get categoryIcon => 'local_gas_station';
+
+  @override
   Map<String, dynamic> toJson() {
-    final json = super.toJson();
-    json.addAll({
-      'gallonsNeeded': gallonsNeeded,
-      'placeId': placeId,
-    });
-    return json;
+    return {
+      ...super.toJson(),
+      'fuelLevel': fuelLevel,
+      'brand': brand,
+      'pricePerGallon': pricePerGallon,
+    };
   }
 
   factory FuelStop.fromJson(Map<String, dynamic> json) {
     return FuelStop(
-      id: json['id'],
-      name: json['name'],
-      location: LatLng(json['latitude'], json['longitude']),
-      order: json['order'],
-      estimatedDuration: json['estimatedDuration'] != null
-          ? Duration(minutes: json['estimatedDuration'])
-          : const Duration(minutes: 15),
+      id: json['id'] as String,
+      name: json['name'] as String,
+      location: LatLng(
+        json['latitude'] as double,
+        json['longitude'] as double,
+      ),
+      order: json['order'] as int,
+      fuelLevel: (json['fuelLevel'] as num).toDouble(),
+      brand: json['brand'] as String? ?? 'Any',
+      pricePerGallon: (json['pricePerGallon'] as num?)?.toDouble() ?? 0.0,
+      estimatedDuration: Duration(
+        minutes: json['estimatedDuration'] as int? ?? 10,
+      ),
       timeWindow: json['timeWindow'] != null
-          ? TimeWindow.fromJson(json['timeWindow'])
+          ? TimeWindow.fromJson(json['timeWindow'] as Map<String, dynamic>)
           : null,
-      notes: json['notes'],
-      gallonsNeeded: json['gallonsNeeded'].toDouble(),
-      placeId: json['placeId'],
+      notes: json['notes'] as String?,
     );
   }
 }

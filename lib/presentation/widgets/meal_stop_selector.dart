@@ -1,7 +1,10 @@
+// lib/presentation/widgets/meal_stop_selector.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/food_stop.dart';
 import '../../core/models/stop.dart';
+import '../../core/models/time_window.dart';
+import '../../core/models/place.dart';
 
 class MealStopSelector extends StatefulWidget {
   final FoodStop mealStop;
@@ -31,7 +34,7 @@ class _MealStopSelectorState extends State<MealStopSelector> {
   void initState() {
     super.initState();
     _selectedTime = TimeOfDay.fromDateTime(
-      widget.mealStop.timeWindow?.preferred ?? DateTime.now(),
+      widget.mealStop.timeWindow?.preferred?.start ?? DateTime.now(),
     );
     _preferences = List.from(widget.mealStop.preferences);
     _maxDetour = widget.mealStop.maxDetour;
@@ -113,25 +116,25 @@ class _MealStopSelectorState extends State<MealStopSelector> {
                   spacing: 8,
                   children: [
                     FilterChip(
-                      label: const Text('Fast Food'),
+                      label: const Text('Fast Service'),
                       selected:
-                          _preferences.any((p) => p.category == 'fast-food'),
-                      onSelected: (selected) =>
-                          _togglePreference('fast-food', selected),
+                          _preferences.contains(FoodPreference.fastService),
+                      onSelected: (selected) => _togglePreference(
+                          FoodPreference.fastService, selected),
                     ),
                     FilterChip(
-                      label: const Text('Sit Down'),
+                      label: const Text('Vegetarian'),
                       selected:
-                          _preferences.any((p) => p.category == 'sit-down'),
-                      onSelected: (selected) =>
-                          _togglePreference('sit-down', selected),
+                          _preferences.contains(FoodPreference.vegetarian),
+                      onSelected: (selected) => _togglePreference(
+                          FoodPreference.vegetarian, selected),
                     ),
                     FilterChip(
-                      label: const Text('Healthy'),
+                      label: const Text('Kid Friendly'),
                       selected:
-                          _preferences.any((p) => p.category == 'healthy'),
-                      onSelected: (selected) =>
-                          _togglePreference('healthy', selected),
+                          _preferences.contains(FoodPreference.kidFriendly),
+                      onSelected: (selected) => _togglePreference(
+                          FoodPreference.kidFriendly, selected),
                     ),
                   ],
                 ),
@@ -214,7 +217,7 @@ class _MealStopSelectorState extends State<MealStopSelector> {
                             const Icon(Icons.restaurant, color: Colors.orange),
                       ),
                       title: Text(
-                        suggestion.restaurant.name,
+                        suggestion.place.name,
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Column(
@@ -224,23 +227,25 @@ class _MealStopSelectorState extends State<MealStopSelector> {
                             children: [
                               Icon(Icons.star, size: 16, color: Colors.amber),
                               const SizedBox(width: 4),
-                              Text('${suggestion.rating}'),
+                              Text('${suggestion.place.rating ?? 'N/A'}'),
+                              const SizedBox(width: 8),
+                              if (suggestion.place.priceLevel != null)
+                                Text(
+                                  '\$' *
+                                      (suggestion.place.priceLevel!.index + 1),
+                                  style: TextStyle(
+                                      color: theme.colorScheme.primary),
+                                ),
                               const SizedBox(width: 8),
                               Text(
-                                '\$' * (suggestion.priceLevel.index + 1),
-                                style:
-                                    TextStyle(color: theme.colorScheme.primary),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '+${suggestion.detour.inMinutes} min',
+                                '+${suggestion.detourMinutes.toInt()} min',
                                 style:
                                     TextStyle(color: theme.colorScheme.outline),
                               ),
                             ],
                           ),
                           Text(
-                            '${suggestion.distance.toStringAsFixed(1)} mi away',
+                            '${suggestion.detourMiles.toStringAsFixed(1)} mi away',
                             style: theme.textTheme.bodySmall,
                           ),
                         ],
@@ -284,12 +289,12 @@ class _MealStopSelectorState extends State<MealStopSelector> {
     );
   }
 
-  void _togglePreference(String category, bool selected) {
+  void _togglePreference(FoodPreference preference, bool selected) {
     setState(() {
       if (selected) {
-        _preferences.add(FoodPreference(category: category));
+        _preferences.add(preference);
       } else {
-        _preferences.removeWhere((p) => p.category == category);
+        _preferences.remove(preference);
       }
     });
   }
@@ -304,15 +309,27 @@ class _MealStopSelectorState extends State<MealStopSelector> {
       _selectedTime.minute,
     );
 
-    final updatedStop = widget.mealStop.copyWith(
+    final updatedStop = FoodStop(
+      id: widget.mealStop.id,
+      name: widget.mealStop.name,
+      location: widget.mealStop.location,
+      order: widget.mealStop.order,
+      mealType: widget.mealStop.mealType,
+      preferences: _preferences,
+      maxDetour: _maxDetour,
+      estimatedDuration: widget.mealStop.estimatedDuration,
+      selectedRestaurant: _selectedSuggestionIndex != null
+          ? widget.suggestions[_selectedSuggestionIndex!].place
+          : widget.mealStop.selectedRestaurant,
       timeWindow: TimeWindow(
         earliest: preferredTime.subtract(const Duration(hours: 1)),
         latest: preferredTime.add(const Duration(hours: 1)),
-        preferred: preferredTime,
+        preferred: TimeRange(
+          start: preferredTime,
+          end: preferredTime.add(const Duration(minutes: 30)),
+        ),
       ),
-      selectedRestaurant: _selectedSuggestionIndex != null
-          ? widget.suggestions[_selectedSuggestionIndex!].restaurant
-          : null,
+      notes: widget.mealStop.notes,
     );
 
     widget.onUpdate(updatedStop);

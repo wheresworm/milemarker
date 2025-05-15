@@ -1,242 +1,178 @@
-import 'dart:math' as math;
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+// lib/core/services/food_stop_service.dart
+import 'dart:math';
+import '../models/stop.dart';
 import '../models/food_stop.dart';
-import '../models/meal_preferences.dart';
 import '../models/place.dart';
-import '../models/time_window.dart';
-import '../models/user_route.dart';
-import 'places_service.dart';
+import '../models/user_route.dart'; // Add this import
+import '../services/places_service.dart';
+import '../services/directions_service.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class FoodStopService {
   final PlacesService _placesService;
+  final DirectionsService _directionsService;
 
-  FoodStopService({required PlacesService placesService})
-      : _placesService = placesService;
+  FoodStopService({
+    PlacesService? placesService,
+    DirectionsService? directionsService,
+  })  : _placesService = placesService ?? PlacesService(),
+        _directionsService = directionsService ?? DirectionsService();
 
-  Future<List<FoodStop>> suggestMealStops({
-    required UserRoute route,
-    required MealPreferences preferences,
-  }) async {
-    final mealStops = <FoodStop>[];
-    final tripDuration = route.totalDuration;
-    final departureTime = route.departureTime ?? DateTime.now();
-
-    // Determine which meals fall within the trip
-    final meals = _getMealsForTrip(departureTime, tripDuration);
-
-    for (final meal in meals) {
-      // Calculate when we'll be hungry (meal time window)
-      final mealTimeWindow = _getMealTimeWindow(meal, departureTime);
-
-      // Find position on route at meal time
-      final positionAtMealTime = _getPositionAtTime(
-        route,
-        mealTimeWindow.preferred!.start,
-        departureTime,
-      );
-
-      if (positionAtMealTime != null) {
-        // Search for restaurants near this position
-        final nearbyRestaurants = await _searchRestaurantsNearPosition(
-          position: positionAtMealTime,
-          preferences: preferences,
-          mealType: meal,
-          maxDetour: preferences.maxDetourDistance ?? 5000,
-        );
-
-        // Filter and rank restaurants
-        final rankedRestaurants = _rankRestaurants(
-          restaurants: nearbyRestaurants,
-          preferences: preferences,
-          isOpenAt: mealTimeWindow.preferred!.start,
-        );
-
-        if (rankedRestaurants.isNotEmpty) {
-          final bestOption = rankedRestaurants.first;
-
-          mealStops.add(FoodStop(
-            name: '${meal.name} - ${bestOption.name}',
-            location: bestOption.location,
-            placeId: bestOption.placeId,
-            mealType: meal,
-            cuisineType: _getCuisineType(bestOption),
-            rating: bestOption.rating,
-            priceLevel: bestOption.priceLevel,
-            timeWindow: mealTimeWindow,
-            order: route.stops.length + mealStops.length,
-          ));
-        }
-      }
-    }
-
-    return mealStops;
-  }
-
-  List<MealType> _getMealsForTrip(
-      DateTime departureTime, Duration tripDuration) {
-    final meals = <MealType>[];
-    final arrivalTime = departureTime.add(tripDuration);
-
-    // Check each meal time
-    for (final meal in MealType.values) {
-      final mealTime = _getDefaultMealTime(meal, departureTime);
-
-      if (mealTime.isAfter(departureTime) && mealTime.isBefore(arrivalTime)) {
-        meals.add(meal);
-      }
-    }
-
-    return meals;
-  }
-
-  TimeWindow _getMealTimeWindow(MealType meal, DateTime departureTime) {
-    final baseTime = _getDefaultMealTime(meal, departureTime);
-
-    return TimeWindow(
-      earliest: baseTime.subtract(const Duration(hours: 1)),
-      preferred: TimeRange(
-        start: baseTime.subtract(const Duration(minutes: 30)),
-        end: baseTime.add(const Duration(minutes: 30)),
-      ),
-      latest: baseTime.add(const Duration(hours: 1)),
-    );
-  }
-
-  DateTime _getDefaultMealTime(MealType meal, DateTime date) {
-    switch (meal) {
-      case MealType.breakfast:
-        return DateTime(date.year, date.month, date.day, 8, 0);
-      case MealType.lunch:
-        return DateTime(date.year, date.month, date.day, 12, 30);
-      case MealType.dinner:
-        return DateTime(date.year, date.month, date.day, 18, 30);
-    }
-  }
-
-  LatLng? _getPositionAtTime(
-    UserRoute route,
-    DateTime targetTime,
-    DateTime departureTime,
-  ) {
-    final elapsed = targetTime.difference(departureTime);
-    final progress = elapsed.inSeconds / route.totalDuration.inSeconds;
-
-    if (progress < 0 || progress > 1) return null;
-
-    // Interpolate position along route
-    final totalPoints = route.polylinePoints.length;
-    final targetIndex = (totalPoints * progress).floor();
-
-    if (targetIndex >= totalPoints - 1) {
-      return route.polylinePoints.last;
-    }
-
-    return route.polylinePoints[targetIndex];
-  }
-
-  Future<List<Place>> _searchRestaurantsNearPosition({
-    required LatLng position,
-    required MealPreferences preferences,
+  Future<List<FoodSuggestion>> findMealOptions({
     required MealType mealType,
-    required double maxDetour,
+    required LatLng location,
+    required DateTime targetTime,
+    required List<FoodPreference> preferences,
+    required Duration maxDetour,
+    double searchRadius = 5000,
   }) async {
-    // Build search query based on preferences
-    String query = 'restaurant';
-
-    if (preferences.cuisineTypes != null &&
-        preferences.cuisineTypes!.isNotEmpty) {
-      query = '${preferences.cuisineTypes!.first} restaurant';
-    }
-
-    final results = await _placesService.searchPlaces(
-      query: query,
-      location: position,
-      radiusMeters: maxDetour,
+    // Get restaurant places
+    final places = await _placesService.searchNearbyPlaces(
+      location: location,
+      radius: searchRadius.toInt(),
       type: PlaceType.restaurant,
     );
 
-    // Filter out fast food if needed
-    if (preferences.avoidFastFood) {
-      results.removeWhere((place) =>
-          place.name.toLowerCase().contains('mcdonald') ||
-          place.name.toLowerCase().contains('burger king') ||
-          place.name.toLowerCase().contains('wendy'));
+    final suggestions = <FoodSuggestion>[];
+
+    for (final place in places) {
+      if (!_matchesPreferences(place, preferences)) continue;
+
+      final detour = await _calculateDetour(location, place.location);
+
+      if (detour.inMinutes <= maxDetour.inMinutes) {
+        suggestions.add(
+          FoodSuggestion(
+            place: place,
+            detourMinutes: detour.inMinutes.toDouble(),
+            detourMiles: _calculateDistance(location, place.location),
+            matchingPreferences: _getMatchingPreferences(place, preferences),
+          ),
+        );
+      }
     }
 
-    // Filter by minimum rating
-    results.removeWhere((place) =>
-        place.rating != null && place.rating! < preferences.minRating);
+    suggestions.sort((a, b) {
+      final aScore = a.detourMinutes + (5 - a.matchingPreferences.length) * 5;
+      final bScore = b.detourMinutes + (5 - b.matchingPreferences.length) * 5;
+      return aScore.compareTo(bScore);
+    });
 
-    return results;
+    return suggestions.take(10).toList();
   }
 
-  List<Place> _rankRestaurants({
-    required List<Place> restaurants,
-    required MealPreferences preferences,
-    required DateTime isOpenAt,
-  }) {
-    final scored = restaurants.map((restaurant) {
-      double score = 0;
+  Future<List<FoodSuggestion>> suggestMealStops({
+    required UserRoute route,
+    required DateTime departureTime,
+    required List<FoodPreference> preferences,
+  }) async {
+    final suggestions = <FoodSuggestion>[];
 
-      // Open at meal time
-      if (restaurant.openingHours?.isOpenAt(isOpenAt) ?? false) {
-        score += 2;
-      }
+    for (var stop in route.stops) {
+      if (stop is FoodStop) continue;
 
-      // Rating score
-      if (restaurant.rating != null) {
-        score += restaurant.rating! / 5;
-      }
+      final mealType = _getMealTypeForTime(departureTime);
+      final mealSuggestions = await findMealOptions(
+        mealType: mealType,
+        location: stop.location,
+        targetTime: departureTime,
+        preferences: preferences,
+        maxDetour: const Duration(minutes: 15),
+      );
 
-      // Price preference match
-      if (preferences.maxPriceLevel != null && restaurant.priceLevel != null) {
-        final priceScore = _getPriceLevelScore(restaurant.priceLevel!);
-        final prefScore = _getPriceLevelScore(preferences.maxPriceLevel!);
-        if (priceScore <= prefScore) {
-          score += 1;
-        }
-      }
+      suggestions.addAll(mealSuggestions);
+    }
 
-      // Distance penalty
-      if (restaurant.distanceFromRoute != null) {
-        score -= (restaurant.distanceFromRoute! / 5000); // Penalty per km
-      }
+    return suggestions;
+  }
 
-      // Cuisine type match
-      if (preferences.cuisineTypes != null && restaurant.cuisineTypes != null) {
-        for (final cuisine in restaurant.cuisineTypes!) {
-          if (preferences.cuisineTypes!.contains(cuisine)) {
-            score += 1;
-            break;
+  MealType _getMealTypeForTime(DateTime time) {
+    final hour = time.hour;
+    if (hour >= 5 && hour < 11) return MealType.breakfast;
+    if (hour >= 11 && hour < 16) return MealType.lunch;
+    return MealType.dinner;
+  }
+
+  List<String> _getCuisineTypesForMeal(MealType mealType) {
+    switch (mealType) {
+      case MealType.breakfast:
+        return ['breakfast', 'cafe', 'bakery'];
+      case MealType.lunch:
+        return ['sandwich', 'american', 'italian'];
+      case MealType.dinner:
+        return ['american', 'italian', 'steakhouse'];
+    }
+  }
+
+  List<int> _getPriceRangeForPreferences(List<FoodPreference> preferences) {
+    if (preferences.contains(FoodPreference.fastService)) {
+      return [1, 2];
+    }
+    return [1, 2, 3, 4];
+  }
+
+  bool _matchesPreferences(Place place, List<FoodPreference> preferences) {
+    for (final pref in preferences) {
+      switch (pref) {
+        case FoodPreference.vegetarian:
+        case FoodPreference.vegan:
+        case FoodPreference.glutenFree:
+          if (place.rating != null && place.rating! < 4.0) {
+            return false;
           }
-        }
+          break;
+        case FoodPreference.kidFriendly:
+        case FoodPreference.fastService:
+        case FoodPreference.localCuisine:
+        case FoodPreference.petFriendly:
+        case FoodPreference.halal:
+        case FoodPreference.kosher:
+          break;
       }
-
-      return MapEntry(restaurant, score);
-    }).toList();
-
-    // Sort by score descending
-    scored.sort((a, b) => b.value.compareTo(a.value));
-
-    return scored.map((e) => e.key).toList();
-  }
-
-  int _getPriceLevelScore(PriceLevel level) {
-    switch (level) {
-      case PriceLevel.cheap:
-        return 1;
-      case PriceLevel.moderate:
-        return 2;
-      case PriceLevel.expensive:
-        return 3;
-      case PriceLevel.veryExpensive:
-        return 4;
     }
+    return true;
   }
 
-  String? _getCuisineType(Place restaurant) {
-    return restaurant.cuisineTypes?.isNotEmpty ?? false
-        ? restaurant.cuisineTypes!.first
-        : null;
+  List<FoodPreference> _getMatchingPreferences(
+    Place place,
+    List<FoodPreference> preferences,
+  ) {
+    return preferences.where((pref) {
+      switch (pref) {
+        case FoodPreference.localCuisine:
+          return place.rating != null && place.rating! >= 4.5;
+        case FoodPreference.fastService:
+          return !(place.cuisineTypes?.contains('fine dining') ?? false);
+        default:
+          return true;
+      }
+    }).toList();
+  }
+
+  Future<Duration> _calculateDetour(
+    LatLng currentLocation,
+    LatLng stopLocation,
+  ) async {
+    final directDistance = _calculateDistance(currentLocation, stopLocation);
+    return Duration(minutes: (directDistance / 0.5).round());
+  }
+
+  double _calculateDistance(LatLng start, LatLng end) {
+    const double earthRadius = 3958.8;
+
+    final lat1Rad = start.latitude * (pi / 180);
+    final lat2Rad = end.latitude * (pi / 180);
+    final deltaLatRad = (end.latitude - start.latitude) * (pi / 180);
+    final deltaLngRad = (end.longitude - start.longitude) * (pi / 180);
+
+    final a = sin(deltaLatRad / 2) * sin(deltaLatRad / 2) +
+        cos(lat1Rad) *
+            cos(lat2Rad) *
+            sin(deltaLngRad / 2) *
+            sin(deltaLngRad / 2);
+
+    final c = 2 * atan2(sqrt(a), sqrt(1 - a));
+
+    return earthRadius * c;
   }
 }

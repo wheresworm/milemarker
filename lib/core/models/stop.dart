@@ -1,3 +1,4 @@
+// lib/core/models/stop.dart
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'time_window.dart';
 
@@ -9,18 +10,37 @@ class Stop {
   final Duration estimatedDuration;
   final TimeWindow? timeWindow;
   final String? notes;
-  final StopType type;
 
   Stop({
-    String? id,
+    required this.id,
     required this.name,
     required this.location,
     required this.order,
     this.estimatedDuration = const Duration(minutes: 30),
     this.timeWindow,
     this.notes,
-    this.type = StopType.custom,
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+  });
+
+  StopType get stopType => StopType.custom; // Default implementation
+
+  String get categoryIcon {
+    switch (stopType) {
+      case StopType.food:
+        return 'restaurant';
+      case StopType.fuel:
+        return 'local_gas_station';
+      case StopType.hotel:
+        return 'hotel';
+      case StopType.rest:
+        return 'local_parking';
+      case StopType.scenic:
+        return 'landscape';
+      case StopType.place:
+        return 'place';
+      default:
+        return 'location_on';
+    }
+  }
 
   Stop copyWith({
     String? id,
@@ -30,7 +50,6 @@ class Stop {
     Duration? estimatedDuration,
     TimeWindow? timeWindow,
     String? notes,
-    StopType? type,
   }) {
     return Stop(
       id: id ?? this.id,
@@ -40,7 +59,6 @@ class Stop {
       estimatedDuration: estimatedDuration ?? this.estimatedDuration,
       timeWindow: timeWindow ?? this.timeWindow,
       notes: notes ?? this.notes,
-      type: type ?? this.type,
     );
   }
 
@@ -53,10 +71,10 @@ class Stop {
         'estimatedDuration': estimatedDuration.inMinutes,
         'timeWindow': timeWindow?.toJson(),
         'notes': notes,
-        'type': type.toString().split('.').last,
+        'type': stopType.toString().split('.').last,
       };
 
-  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+  Map<String, dynamic> toMap() => toJson();
 
   factory Stop.fromJson(Map<String, dynamic> json) {
     return Stop(
@@ -69,12 +87,20 @@ class Stop {
           ? TimeWindow.fromJson(json['timeWindow'])
           : null,
       notes: json['notes'],
-      type: StopType.values.firstWhere(
-        (t) => t.toString().split('.').last == json['type'],
-        orElse: () => StopType.custom,
-      ),
     );
   }
 }
 
-enum StopType { origin, destination, meal, fuel, rest, hotel, scenic, custom }
+enum StopType {
+  origin,
+  destination,
+  food,
+  fuel,
+  rest,
+  hotel,
+  scenic,
+  place,
+  custom
+}
+
+enum MealType { breakfast, lunch, dinner }

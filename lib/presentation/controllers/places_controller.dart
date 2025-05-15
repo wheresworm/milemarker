@@ -1,119 +1,68 @@
-import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+// lib/presentation/controllers/places_controller.dart
+import 'package:flutter/foundation.dart';
 import '../../core/models/place.dart';
 import '../../core/services/places_service.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 class PlacesController extends ChangeNotifier {
   final PlacesService _placesService;
 
-  List<Place> _searchResults = [];
+  List<Place> _places = [];
+  List<Place> get places => _places;
+
   bool _isLoading = false;
-  String? _error;
-
-  List<Place> get searchResults => _searchResults;
   bool get isLoading => _isLoading;
-  String? get error => _error;
 
-  PlacesController({required PlacesService placesService})
-      : _placesService = placesService;
+  String? _errorMessage;
+  String? get errorMessage => _errorMessage;
 
-  Future<void> searchPlaces({
-    required String query,
+  PlacesController({PlacesService? placesService})
+      : _placesService = placesService ?? PlacesService();
+
+  Future<void> searchPlaces(
+    String query, {
     LatLng? location,
-    double radiusMeters = 50000,
+    double? radiusMeters,
     PlaceType? type,
   }) async {
-    if (query.isEmpty) {
-      _searchResults = [];
-      notifyListeners();
-      return;
-    }
-
     _isLoading = true;
-    _error = null;
+    _errorMessage = null;
     notifyListeners();
 
     try {
-      _searchResults = await _placesService.searchPlaces(
-        query: query,
-        location: location,
-        radiusMeters: radiusMeters,
-        type: type,
-      );
-      _isLoading = false;
-      notifyListeners();
+      if (location != null) {
+        _places = await _placesService.searchNearbyPlaces(
+          location: location,
+          radius: radiusMeters?.toInt() ?? 5000,
+          type: type,
+          keyword: query,
+        );
+      } else {
+        _places = await _placesService.searchPlaces(query);
+      }
     } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
+      _errorMessage = e.toString();
       print('Error searching places: $e');
-      notifyListeners();
-    }
-  }
-
-  Future<void> searchNearby({
-    required LatLng location,
-    required PlaceType type,
-    double radiusMeters = 5000,
-  }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      // Convert type to search query
-      String query = _getQueryForType(type);
-
-      _searchResults = await _placesService.searchPlaces(
-        query: query,
-        location: location,
-        radiusMeters: radiusMeters,
-        type: type,
-      );
+    } finally {
       _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      _isLoading = false;
-      print('Error searching nearby: $e');
       notifyListeners();
     }
   }
 
   Future<Place?> getPlaceDetails(String placeId) async {
     try {
-      return await _placesService.getPlaceDetails(placeId);
+      // Implementation needed in PlacesService
+      final places = await _placesService.searchPlaces(placeId);
+      return places.isNotEmpty ? places.first : null;
     } catch (e) {
-      _error = e.toString();
-      notifyListeners();
+      print('Error getting place details: $e');
       return null;
     }
   }
 
-  void clearResults() {
-    _searchResults = [];
-    _error = null;
+  void clearPlaces() {
+    _places = [];
+    _errorMessage = null;
     notifyListeners();
-  }
-
-  void clearError() {
-    _error = null;
-    notifyListeners();
-  }
-
-  String _getQueryForType(PlaceType type) {
-    switch (type) {
-      case PlaceType.restaurant:
-        return 'restaurant';
-      case PlaceType.gasStation:
-        return 'gas station';
-      case PlaceType.hotel:
-        return 'hotel';
-      case PlaceType.convenienceStore:
-        return 'convenience store';
-      case PlaceType.touristAttraction:
-        return 'tourist attraction';
-      default:
-        return '';
-    }
   }
 }

@@ -1,183 +1,100 @@
+// lib/core/services/directions_service.dart
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../models/directions.dart';
+import '../models/stop.dart';
 
 class DirectionsService {
-  final String? _apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'];
-  final http.Client _httpClient = http.Client();
+  static const String _baseUrl =
+      'https://maps.googleapis.com/maps/api/directions/json';
+  late final String _apiKey;
 
-  Future<Directions> getDirections({
-    LatLng? origin,
-    LatLng? destination,
-    List<LatLng>? waypoints,
-    DateTime? departureTime,
+  DirectionsService() {
+    _apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+  }
+
+  Future<Directions?> getDirections({
+    required LatLng origin,
+    required LatLng destination,
+    List<Stop>? waypoints,
+    bool avoidTolls = false,
+    bool avoidHighways = false,
+    bool avoidFerries = false,
+    String mode = 'driving',
   }) async {
-    if (_apiKey == null) {
-      throw Exception('Google Maps API key not found');
-    }
+    try {
+      String url = '$_baseUrl?'
+          'origin=${origin.latitude},${origin.longitude}&'
+          'destination=${destination.latitude},${destination.longitude}&'
+          'mode=$mode&'
+          'key=$_apiKey';
 
-    // If waypoints are provided but no origin/destination, use first and last
-    final actualOrigin = origin ?? (waypoints?.first);
-    final actualDestination = destination ?? (waypoints?.last);
-
-    if (actualOrigin == null || actualDestination == null) {
-      throw ArgumentError('Origin and destination are required');
-    }
-
-    // Extract intermediate waypoints
-    List<LatLng> intermediateWaypoints = [];
-    if (waypoints != null && waypoints.length > 2) {
-      intermediateWaypoints = waypoints.sublist(1, waypoints.length - 1);
-    }
-
-    String waypointsParam = '';
-    if (intermediateWaypoints.isNotEmpty) {
-      final waypointStrings = intermediateWaypoints
-          .map((w) => '${w.latitude},${w.longitude}')
-          .join('|');
-      waypointsParam = '&waypoints=optimize:true|$waypointStrings';
-    }
-
-    final departureTimeParam = departureTime != null
-        ? '&departure_time=${departureTime.millisecondsSinceEpoch ~/ 1000}'
-        : '';
-
-    final url = Uri.parse(
-      'https://maps.googleapis.com/maps/api/directions/json'
-      '?origin=${actualOrigin.latitude},${actualOrigin.longitude}'
-      '&destination=${actualDestination.latitude},${actualDestination.longitude}'
-      '$waypointsParam'
-      '&mode=driving'
-      '$departureTimeParam'
-      '&key=$_apiKey',
-    );
-
-    final response = await _httpClient.get(url);
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
-        return Directions.fromJson(data['routes'][0]);
-      } else {
-        throw Exception('No routes found: ${data['status']}');
+      // Add waypoints if provided
+      if (waypoints != null && waypoints.isNotEmpty) {
+        final waypointString = waypoints
+            .map((stop) =>
+                '${stop.location.latitude},${stop.location.longitude}')
+            .join('|');
+        url += '&waypoints=$waypointString';
       }
-    } else {
-      throw Exception('Failed to get directions: ${response.statusCode}');
+
+      // Add avoidance parameters
+      List<String> avoid = [];
+      if (avoidTolls) avoid.add('tolls');
+      if (avoidHighways) avoid.add('highways');
+      if (avoidFerries) avoid.add('ferries');
+      if (avoid.isNotEmpty) {
+        url += '&avoid=${avoid.join('|')}';
+      }
+
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
+          // Fix: Use fromGoogleMaps instead of fromJson
+          return Directions.fromGoogleMaps(data);
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Error getting directions: $e');
+      return null;
     }
   }
-}
 
-class Directions {
-  final List<LatLng> polylinePoints;
-  final double totalDistance; // in miles
-  final Duration totalDuration;
-  final String? summary;
-  final List<DirectionStep> steps;
+  Future<Map<String, dynamic>?> optimizeWaypoints({
+    required LatLng origin,
+    required LatLng destination,
+    required List<Stop> waypoints,
+  }) async {
+    if (waypoints.isEmpty) return null;
 
-  Directions({
-    required this.polylinePoints,
-    required this.totalDistance,
-    required this.totalDuration,
-    this.summary,
-    required this.steps,
-  });
+    try {
+      String url = '$_baseUrl?'
+          'origin=${origin.latitude},${origin.longitude}&'
+          'destination=${destination.latitude},${destination.longitude}&'
+          'waypoints=optimize:true|${waypoints.map((stop) => '${stop.location.latitude},${stop.location.longitude}').join('|')}&'
+          'key=$_apiKey';
 
-  factory Directions.fromJson(Map<String, dynamic> json) {
-    final overviewPolyline = json['overview_polyline']['points'];
-    final polylinePoints = _decodePolyline(overviewPolyline);
+      final response = await http.get(Uri.parse(url));
 
-    final legs = json['legs'] as List;
-    double totalDistanceMeters = 0;
-    double totalDurationSeconds = 0;
-    List<DirectionStep> allSteps = [];
-
-    for (final leg in legs) {
-      totalDistanceMeters += (leg['distance']['value'] as num).toDouble();
-      totalDurationSeconds += (leg['duration']['value'] as num).toDouble();
-
-      final steps = leg['steps'] as List;
-      allSteps.addAll(steps.map((s) => DirectionStep.fromJson(s)));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['status'] == 'OK' && data['routes'].isNotEmpty) {
+          return {
+            'optimizedOrder': data['routes'][0]['waypoint_order'],
+            // Fix: Use fromGoogleMaps instead of fromJson
+            'directions': Directions.fromGoogleMaps(data),
+          };
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Error optimizing waypoints: $e');
+      return null;
     }
-
-    return Directions(
-      polylinePoints: polylinePoints,
-      totalDistance: totalDistanceMeters / 1609.344, // Convert to miles
-      totalDuration: Duration(seconds: totalDurationSeconds.toInt()),
-      summary: json['summary'],
-      steps: allSteps,
-    );
-  }
-
-  static List<LatLng> _decodePolyline(String encoded) {
-    List<LatLng> points = [];
-    int index = 0;
-    int len = encoded.length;
-    int lat = 0;
-    int lng = 0;
-
-    while (index < len) {
-      int shift = 0;
-      int result = 0;
-      int byte;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1F) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      int deltaLat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lat += deltaLat;
-
-      shift = 0;
-      result = 0;
-
-      do {
-        byte = encoded.codeUnitAt(index++) - 63;
-        result |= (byte & 0x1F) << shift;
-        shift += 5;
-      } while (byte >= 0x20);
-
-      int deltaLng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
-      lng += deltaLng;
-
-      points.add(LatLng(lat / 1E5, lng / 1E5));
-    }
-
-    return points;
-  }
-}
-
-class DirectionStep {
-  final LatLng startLocation;
-  final LatLng endLocation;
-  final String instructions;
-  final double distance; // in miles
-  final Duration duration;
-  final String travelMode;
-
-  DirectionStep({
-    required this.startLocation,
-    required this.endLocation,
-    required this.instructions,
-    required this.distance,
-    required this.duration,
-    required this.travelMode,
-  });
-
-  factory DirectionStep.fromJson(Map<String, dynamic> json) {
-    final start = json['start_location'];
-    final end = json['end_location'];
-
-    return DirectionStep(
-      startLocation: LatLng(start['lat'], start['lng']),
-      endLocation: LatLng(end['lat'], end['lng']),
-      instructions: json['html_instructions'],
-      distance: json['distance']['value'] / 1609.344, // Convert to miles
-      duration: Duration(seconds: json['duration']['value']),
-      travelMode: json['travel_mode'],
-    );
   }
 }

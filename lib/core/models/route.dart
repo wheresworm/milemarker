@@ -1,3 +1,4 @@
+// lib/core/models/route.dart
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'stop.dart';
 import 'food_stop.dart';
@@ -103,8 +104,11 @@ class Route {
     final breakdown = <String, int>{};
 
     for (final stop in stops) {
-      final category = stop.type.toString().split('.').last;
-      breakdown[category] = (breakdown[category] ?? 0) + 1;
+      if (stop.stopType == StopType.destination) {
+        // Fixed: changed from stop.type
+        final category = stop.stopType.toString().split('.').last;
+        breakdown[category] = (breakdown[category] ?? 0) + 1;
+      }
     }
 
     return breakdown;
@@ -128,7 +132,7 @@ class Route {
       'origin_lng': origin.longitude,
       'destination_lat': destination.latitude,
       'destination_lng': destination.longitude,
-      'stops': stops.map((s) => s.toMap()).toList(),
+      'stops': stops.map((s) => s.toJson()).toList(),
       'distance': distance,
       'duration': duration.inMinutes,
       'departureTime': departureTime?.millisecondsSinceEpoch,
