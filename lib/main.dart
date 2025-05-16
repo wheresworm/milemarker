@@ -1,3 +1,4 @@
+// Updated main.dart with fixed service initializations
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -30,6 +31,12 @@ class MileMarkerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Get the API key from environment variables
+    final apiKey = dotenv.env['GOOGLE_MAPS_API_KEY'] ?? '';
+    if (apiKey.isEmpty) {
+      debugPrint('WARNING: Google Maps API key is not set in .env file');
+    }
+
     return MultiProvider(
       providers: [
         // Core services (lowest level dependencies first)
@@ -43,7 +50,7 @@ class MileMarkerApp extends StatelessWidget {
           create: (_) => PlacesService(),
         ),
         Provider<DirectionsService>(
-          create: (_) => DirectionsService(),
+          create: (_) => DirectionsService(apiKey: apiKey),
         ),
 
         // Services that depend on other services
@@ -52,7 +59,10 @@ class MileMarkerApp extends StatelessWidget {
             placesService: context.read<PlacesService>(),
           ),
           update: (context, placesService, previous) =>
-              previous ?? FoodStopService(placesService: placesService),
+              previous ??
+              FoodStopService(
+                placesService: placesService,
+              ),
         ),
         ProxyProvider<PlacesService, FuelPlanningService>(
           create: (context) => FuelPlanningService(

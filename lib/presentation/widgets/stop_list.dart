@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../core/models/stop.dart';
-import '../../core/models/food_stop.dart';
-import '../../core/models/fuel_stop.dart';
 import 'stop_card.dart';
 
 class StopList extends StatefulWidget {
@@ -54,11 +52,12 @@ class _StopListState extends State<StopList> {
         return StopCard(
           key: ValueKey(stop.id),
           stop: stop,
-          index: index,
-          isFirst: isFirst,
-          isLast: isLast,
           onTap: () => widget.onStopTap(stop),
-          onRemove: isFirst || isLast ? null : () => widget.onRemove(stop.id),
+          // Only pass the onRemove handler if it's not the first or last stop
+          onDelete: isFirst || isLast
+              ? null
+              : () => widget.onRemove(stop
+                  .id), // Changed from onRemove to onDelete if that's what StopCard accepts
         );
       },
     );

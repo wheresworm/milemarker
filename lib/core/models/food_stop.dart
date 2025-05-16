@@ -1,4 +1,3 @@
-// lib/core/models/food_stop.dart
 import 'package:milemarker/core/models/stop.dart';
 import 'package:milemarker/core/models/time_window.dart';
 import 'package:milemarker/core/models/place.dart';
@@ -35,28 +34,25 @@ class FoodStop extends Stop {
   final List<FoodPreference> preferences;
   final Duration maxDetour;
   final Place? selectedRestaurant;
+  final String cuisine;
+  final int priceLevel;
 
+  // Updated to use super parameters
   FoodStop({
-    required String id,
-    required String name,
-    required LatLng location,
-    required int order,
-    required this.mealType, // Fixed: Remove the invalid "MealType" type declaration
+    required super.id,
+    required super.name,
+    required super.location,
+    required super.order,
+    required this.mealType,
     this.preferences = const [],
     this.maxDetour = const Duration(minutes: 15),
     this.selectedRestaurant,
-    Duration estimatedDuration = const Duration(minutes: 45),
-    TimeWindow? timeWindow,
-    String? notes,
-  }) : super(
-          id: id,
-          name: name,
-          location: location,
-          order: order,
-          estimatedDuration: estimatedDuration,
-          timeWindow: timeWindow,
-          notes: notes,
-        );
+    super.estimatedDuration = const Duration(minutes: 45),
+    super.timeWindow,
+    super.notes,
+    this.cuisine = '',
+    this.priceLevel = 2,
+  });
 
   @override
   StopType get stopType => StopType.food;
@@ -82,6 +78,8 @@ class FoodStop extends Stop {
           preferences.map((p) => p.toString().split('.').last).toList(),
       'maxDetour': maxDetour.inSeconds,
       'selectedRestaurant': selectedRestaurant?.toJson(),
+      'cuisine': cuisine,
+      'priceLevel': priceLevel,
     };
   }
 
@@ -114,6 +112,8 @@ class FoodStop extends Stop {
           ? TimeWindow.fromJson(json['timeWindow'] as Map<String, dynamic>)
           : null,
       notes: json['notes'] as String?,
+      cuisine: json['cuisine'] as String? ?? '',
+      priceLevel: json['priceLevel'] as int? ?? 2,
     );
   }
 }

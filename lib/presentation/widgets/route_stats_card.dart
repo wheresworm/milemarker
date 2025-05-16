@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/trip.dart';
-import '../../core/models/stop.dart';
-import '../../core/models/food_stop.dart';
-import '../../core/models/fuel_stop.dart';
 import '../../core/utils/formatters.dart';
 import '../controllers/tracking_controller.dart';
 

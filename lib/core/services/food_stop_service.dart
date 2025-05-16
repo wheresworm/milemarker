@@ -3,20 +3,21 @@ import 'dart:math';
 import '../models/stop.dart';
 import '../models/food_stop.dart';
 import '../models/place.dart';
-import '../models/user_route.dart'; // Add this import
+import '../models/user_route.dart';
 import '../services/places_service.dart';
 import '../services/directions_service.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter/material.dart'; // Import for debugPrint
 
 class FoodStopService {
   final PlacesService _placesService;
-  final DirectionsService _directionsService;
+  final DirectionsService? _directionsService; // Make nullable
 
   FoodStopService({
-    PlacesService? placesService,
-    DirectionsService? directionsService,
-  })  : _placesService = placesService ?? PlacesService(),
-        _directionsService = directionsService ?? DirectionsService();
+    required PlacesService placesService,
+    DirectionsService? directionsService, // Make optional
+  })  : _placesService = placesService,
+        _directionsService = directionsService;
 
   Future<List<FoodSuggestion>> findMealOptions({
     required MealType mealType,
@@ -26,17 +27,25 @@ class FoodStopService {
     required Duration maxDetour,
     double searchRadius = 5000,
   }) async {
+    final cuisineTypes = _getCuisineTypesForMeal(mealType);
+    final priceRange = _getPriceRangeForPreferences(preferences);
+
     // Get restaurant places
     final places = await _placesService.searchNearbyPlaces(
       location: location,
       radius: searchRadius.toInt(),
       type: PlaceType.restaurant,
+      keyword: cuisineTypes.isNotEmpty
+          ? cuisineTypes.join(' ')
+          : null, // Use cuisine types in the search
     );
 
     final suggestions = <FoodSuggestion>[];
 
     for (final place in places) {
       if (!_matchesPreferences(place, preferences)) continue;
+      if (!_matchesPriceRange(place, priceRange))
+        continue; // Add price range check
 
       final detour = await _calculateDetour(location, place.location);
 
@@ -153,6 +162,23 @@ class FoodStopService {
     LatLng currentLocation,
     LatLng stopLocation,
   ) async {
+    // If directionsService is available, use it for more accurate calculations
+    if (_directionsService != null) {
+      try {
+        final directions = await _directionsService?.getDirections(
+          origin: currentLocation,
+          destination: stopLocation,
+        );
+        if (directions != null) {
+          return directions.totalDuration;
+        }
+      } catch (e) {
+        debugPrint('Error calculating detour using directions service: $e');
+        // Fall back to distance-based calculation
+      }
+    }
+
+    // Fallback calculation based on distance
     final directDistance = _calculateDistance(currentLocation, stopLocation);
     return Duration(minutes: (directDistance / 0.5).round());
   }
@@ -174,5 +200,11 @@ class FoodStopService {
     final c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
     return earthRadius * c;
+  }
+
+  bool _matchesPriceRange(Place place, List<int> priceRange) {
+    if (priceRange.isEmpty) return true;
+    return place.priceLevel != null &&
+        priceRange.contains(place.priceLevel!.index + 1);
   }
 }

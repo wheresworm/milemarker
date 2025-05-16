@@ -2,7 +2,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../models/fuel_stop.dart';
 import '../models/user_route.dart';
 import '../models/vehicle.dart';
+import '../models/place.dart'; // Add this import for PlaceType
 import './places_service.dart';
+import 'dart:math' as math;
 
 class FuelPlanningService {
   final PlacesService _placesService;
@@ -21,9 +23,6 @@ class FuelPlanningService {
 
     // Calculate fuel consumption per km
     final fuelConsumptionPerKm = vehicle.fuelConsumption / 100;
-
-    // Calculate range with current fuel
-    double remainingRange = currentFuelLevel / fuelConsumptionPerKm;
 
     // Never let fuel drop below 25% of tank capacity
     final minFuelLevel = vehicle.tankCapacity * 0.25;
@@ -44,10 +43,11 @@ class FuelPlanningService {
         final fuelStopLocation = route.polylinePoints[i];
 
         // Search for gas stations near this point
-        final gasStations = await _placesService.searchPlaces(
-          'gas station',
+        final gasStations = await _placesService.searchNearbyPlaces(
           location: fuelStopLocation,
-          radiusMeters: (maxDetourDistance * 1000).round(),
+          radius: (maxDetourDistance * 1000).round(),
+          type: PlaceType.gasStation,
+          keyword: 'gas station',
         );
 
         if (gasStations.isNotEmpty) {
@@ -56,6 +56,7 @@ class FuelPlanningService {
           // Calculate how much fuel is needed
           final fuelUsedToHere = coveredDistance * fuelConsumptionPerKm;
           final fuelLevelAtStop = currentFuelLevel - fuelUsedToHere;
+          // We'll actually use the gallonsNeeded variable
           final gallonsNeeded = vehicle.tankCapacity - fuelLevelAtStop;
 
           final fuelStop = FuelStop(
@@ -63,26 +64,24 @@ class FuelPlanningService {
             name: station.name,
             location: station.location,
             order: i,
-            placeId: station.placeId,
             fuelLevel: fuelLevelAtStop,
-            gallonsNeeded: gallonsNeeded,
             fuelType: vehicle.preferredFuelType,
             currentPrice: 3.50, // Placeholder price
             brand: _extractBrand(station.name),
             estimatedDuration: const Duration(minutes: 10),
+            // Could potentially add any relevant info from gallonsNeeded to notes
+            notes:
+                'Needs approx. ${gallonsNeeded.toStringAsFixed(2)} gallons', // Using gallonsNeeded
           );
 
           fuelStops.add(fuelStop);
 
           // Reset for next segment
           coveredDistance = 0;
-          remainingRange =
-              (vehicle.tankCapacity - minFuelLevel) / fuelConsumptionPerKm;
         }
       }
 
       coveredDistance += segment;
-      remainingRange -= segment;
     }
 
     return fuelStops;
@@ -120,13 +119,13 @@ class FuelPlanningService {
     final double deltaLng =
         (point2.longitude - point1.longitude) * (3.14159 / 180);
 
-    final double a = (Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)) +
-        (Math.cos(lat1Rad) *
-            Math.cos(lat2Rad) *
-            Math.sin(deltaLng / 2) *
-            Math.sin(deltaLng / 2));
+    final double a = (math.sin(deltaLat / 2) * math.sin(deltaLat / 2)) +
+        (math.cos(lat1Rad) *
+            math.cos(lat2Rad) *
+            math.sin(deltaLng / 2) *
+            math.sin(deltaLng / 2));
 
-    final double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
 
     return earthRadius * c;
   }
@@ -137,19 +136,21 @@ class FuelPlanningService {
     required String brand,
     double radiusKm = 10.0,
   }) async {
-    final results = await _placesService.searchPlaces(
-      '$brand gas station',
+    // Fixed: Use searchNearbyPlaces instead of searchPlaces, with correct parameter names
+    final results = await _placesService.searchNearbyPlaces(
       location: location,
-      radiusMeters: (radiusKm * 1000).round(),
+      radius: (radiusKm * 1000).round(),
+      type: PlaceType.gasStation,
+      keyword: '$brand gas station',
     );
 
     return results
         .map((place) => FuelStop(
-              id: 'fuel_${place.placeId}',
+              id: 'fuel_${place.id}', // Changed from place.placeId to place.id
               name: place.name,
               location: place.location,
               order: 0,
-              placeId: place.placeId,
+              fuelLevel: 0.0, // Added required parameter
               fuelType: 'regular',
               currentPrice: 3.50, // Placeholder
               brand: brand,

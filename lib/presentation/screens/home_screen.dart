@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'map_screen.dart';
-import 'route_builder_screen.dart';
+import 'route_builder_screen.dart'; // Use relative import since files are in the same directory
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -19,10 +19,10 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
         ),
-        body: const TabBarView(
+        body: TabBarView(
           children: [
-            MapScreen(),
-            RouteBuilderScreen(),
+            const MapScreen(),
+            const RouteBuilderScreen(),
           ],
         ),
       ),

@@ -14,15 +14,15 @@ class AppTheme {
         brightness: Brightness.light,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        indicatorColor: primaryColor.withOpacity(0.2),
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        indicatorColor: primaryColor.withAlpha(51),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return const IconThemeData(color: primaryColor);
           }
           return IconThemeData(color: Colors.grey[600]);
         }),
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return const TextStyle(
                 color: primaryColor, fontWeight: FontWeight.w600);
           }
@@ -65,15 +65,15 @@ class AppTheme {
         brightness: Brightness.dark,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        indicatorColor: primaryColor.withOpacity(0.2),
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        indicatorColor: primaryColor.withAlpha(51),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return const IconThemeData(color: primaryColor);
           }
           return const IconThemeData(color: Colors.grey);
         }),
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return const TextStyle(
                 color: primaryColor, fontWeight: FontWeight.w600);
           }

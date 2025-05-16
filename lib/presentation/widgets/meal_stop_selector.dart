@@ -2,9 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/models/food_stop.dart';
-import '../../core/models/stop.dart';
 import '../../core/models/time_window.dart';
-import '../../core/models/place.dart';
 
 class MealStopSelector extends StatefulWidget {
   final FoodStop mealStop;
@@ -34,7 +32,7 @@ class _MealStopSelectorState extends State<MealStopSelector> {
   void initState() {
     super.initState();
     _selectedTime = TimeOfDay.fromDateTime(
-      widget.mealStop.timeWindow?.preferred?.start ?? DateTime.now(),
+      widget.mealStop.timeWindow?.preferred ?? DateTime.now(),
     );
     _preferences = List.from(widget.mealStop.preferences);
     _maxDetour = widget.mealStop.maxDetour;
@@ -58,7 +56,8 @@ class _MealStopSelectorState extends State<MealStopSelector> {
             height: 4,
             margin: const EdgeInsets.symmetric(vertical: 12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.outline.withOpacity(0.4),
+              color:
+                  theme.colorScheme.outline.withAlpha(102), // 0.4 * 255 = 102
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -210,7 +209,7 @@ class _MealStopSelectorState extends State<MealStopSelector> {
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.1),
+                          color: Colors.orange.withAlpha(26), // 0.1 * 255 = 26
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child:
@@ -324,10 +323,7 @@ class _MealStopSelectorState extends State<MealStopSelector> {
       timeWindow: TimeWindow(
         earliest: preferredTime.subtract(const Duration(hours: 1)),
         latest: preferredTime.add(const Duration(hours: 1)),
-        preferred: TimeRange(
-          start: preferredTime,
-          end: preferredTime.add(const Duration(minutes: 30)),
-        ),
+        preferred: preferredTime,
       ),
       notes: widget.mealStop.notes,
     );

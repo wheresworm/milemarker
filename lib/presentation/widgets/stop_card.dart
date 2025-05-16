@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/models/stop.dart';
 import '../../core/models/food_stop.dart';
 import '../../core/models/fuel_stop.dart';
-import '../../core/utils/constants.dart';
+import '../../core/models/time_window.dart';
 
 class StopCard extends StatelessWidget {
   final Stop stop;
@@ -44,7 +44,7 @@ class StopCard extends StatelessWidget {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(
-            color: theme.colorScheme.outline.withValues(alpha: 0.3),
+            color: theme.colorScheme.outline.withAlpha(77), // 0.3 * 255 = 77
             width: 1,
           ),
         ),
@@ -81,17 +81,17 @@ class StopCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       if (stop.timeWindow != null)
                         Text(
-                          _formatTimeWindow(stop.timeWindow!),
+                          _formatTimeWindow(stop.timeWindow),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurface
-                                .withValues(alpha: 0.7),
+                                .withAlpha(179), // 0.7 * 255 = 179
                           ),
                         ),
-                      if (stop.notes != null && stop.notes!.isNotEmpty)
+                      if (stop.notes?.isNotEmpty ?? false)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
-                            stop.notes!,
+                            stop.notes ?? '',
                             style: theme.textTheme.bodySmall,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -107,11 +107,12 @@ class StopCard extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                      color: theme.colorScheme.primary
+                          .withAlpha(26), // 0.1 * 255 = 26
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      _formatDuration(stop.estimatedDuration!),
+                      _formatDuration(stop.estimatedDuration),
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.primary,
                         fontWeight: FontWeight.w500,
@@ -146,7 +147,7 @@ class StopCard extends StatelessWidget {
       width: 48,
       height: 48,
       decoration: BoxDecoration(
-        color: iconColor.withValues(alpha: 0.1),
+        color: iconColor.withAlpha(26), // 0.1 * 255 = 26
         borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(
@@ -168,13 +169,29 @@ class StopCard extends StatelessWidget {
     }
   }
 
-  String _formatTimeWindow(TimeWindow timeWindow) {
-    final preferredTime =
-        '${timeWindow.preferred.hour}:${timeWindow.preferred.minute.toString().padLeft(2, '0')}';
-    return 'Preferred: $preferredTime';
+  String _formatTimeWindow(TimeWindow? timeWindow) {
+    if (timeWindow == null) return '';
+
+    final preferred = timeWindow.preferred;
+    if (preferred != null) {
+      final timeStr =
+          '${preferred.hour}:${preferred.minute.toString().padLeft(2, '0')}';
+      return 'Preferred: $timeStr';
+    }
+
+    final earliest = timeWindow.earliest;
+    if (earliest != null) {
+      final timeStr =
+          '${earliest.hour}:${earliest.minute.toString().padLeft(2, '0')}';
+      return 'From: $timeStr';
+    }
+
+    return '';
   }
 
-  String _formatDuration(Duration duration) {
+  String _formatDuration(Duration? duration) {
+    if (duration == null) return '';
+
     if (duration.inHours > 0) {
       return '${duration.inHours}h ${duration.inMinutes % 60}m';
     }

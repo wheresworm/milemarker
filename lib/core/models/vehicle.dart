@@ -6,6 +6,11 @@ class Vehicle {
   final double tankSize;
   final String fuelType;
 
+  // Fix naming and remove duplications
+  double get fuelConsumption => mpg; // alias for fuel planning service
+  double get tankCapacity => tankSize; // alias for fuel planning service
+  String get preferredFuelType => fuelType; // alias for fuel planning service
+
   Vehicle({
     required this.id,
     required this.name,

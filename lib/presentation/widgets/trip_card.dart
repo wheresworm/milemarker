@@ -85,14 +85,16 @@ class TripCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            trip.title ?? 'Trip #${trip.id}',
+                            trip.title,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            Formatters.formatDateTime(trip.startTime),
+                            trip.startTime != null
+                                ? Formatters.formatDateTime(trip.startTime!)
+                                : 'No start time',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.outline,
                             ),
@@ -103,10 +105,10 @@ class TripCard extends StatelessWidget {
                     if (trip.category != null)
                       Chip(
                         label: Text(
-                          trip.category!,
+                          trip.category,
                           style: theme.textTheme.labelSmall,
                         ),
-                        backgroundColor: _getCategoryColor(trip.category!),
+                        backgroundColor: _getCategoryColor(trip.category),
                       ),
                   ],
                 ),
@@ -117,19 +119,25 @@ class TripCard extends StatelessWidget {
                     _buildStatistic(
                       context,
                       Icons.straighten,
-                      Formatters.formatDistance(trip.distance),
+                      trip.distance != null
+                          ? Formatters.formatDistance(trip.distance!)
+                          : 'N/A',
                       'Distance',
                     ),
                     _buildStatistic(
                       context,
                       Icons.timer,
-                      Formatters.formatDuration(trip.duration),
+                      trip.duration != null
+                          ? Formatters.formatDuration(trip.duration!)
+                          : 'N/A',
                       'Duration',
                     ),
                     _buildStatistic(
                       context,
                       Icons.speed,
-                      Formatters.formatSpeed(trip.averageSpeed),
+                      trip.averageSpeed != null
+                          ? Formatters.formatSpeed(trip.averageSpeed!)
+                          : 'N/A',
                       'Avg Speed',
                     ),
                   ],
@@ -203,26 +211,25 @@ class TripCard extends StatelessWidget {
   Future<bool> _showDeleteConfirmation(BuildContext context) async {
     return await showDialog<bool>(
           context: context,
-          builder:
-              (context) => AlertDialog(
-                title: const Text('Delete Trip'),
-                content: const Text(
-                  'Are you sure you want to delete this trip?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(true),
-                    child: const Text(
-                      'Delete',
-                      style: TextStyle(color: Colors.red),
-                    ),
-                  ),
-                ],
+          builder: (context) => AlertDialog(
+            title: const Text('Delete Trip'),
+            content: const Text(
+              'Are you sure you want to delete this trip?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Cancel'),
               ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
         ) ??
         false;
   }

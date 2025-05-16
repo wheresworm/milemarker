@@ -1,6 +1,5 @@
+// Updated RouteService.dart
 import 'package:flutter/material.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import '../models/favorite_route.dart';
 import '../models/stop.dart';
 import '../models/trip.dart';
 import '../models/user_route.dart';
@@ -10,6 +9,8 @@ import '../services/places_service.dart';
 import '../services/directions_service.dart';
 import '../services/food_stop_service.dart';
 import '../services/fuel_planning_service.dart';
+import '../models/food_stop.dart';
+import '../models/vehicle.dart';
 
 class RouteService extends ChangeNotifier {
   final DatabaseService _databaseService;
@@ -50,7 +51,9 @@ class RouteService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _routes = await _databaseService.getRoutes();
+      // Assuming you've implemented the getRoutes method in DatabaseService
+      _routes = await _databaseService
+          .getUserRoutes(); // Changed from getRoutes to getUserRoutes
       _isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -67,24 +70,49 @@ class RouteService extends ChangeNotifier {
     UserPreferences? preferences,
   }) async {
     try {
+      if (stops.isEmpty) {
+        throw Exception('Route must have at least one stop');
+      }
+
+      // Extract origin and destination
+      final origin = stops.first.location;
+      final destination = stops.last.location;
+
+      // Use intermediate stops as waypoints if any
+      final waypointStops =
+          stops.length > 2 ? stops.sublist(1, stops.length - 1) : null;
+
       // Calculate route details
-      final locationPoints = stops.map((s) => s.location).toList();
       final directions = await _directionsService.getDirections(
-        waypoints: locationPoints,
+        origin: origin,
+        destination: destination,
+        waypoints: waypointStops,
         departureTime: departureTime,
       );
 
+      if (directions == null) {
+        throw Exception('Failed to calculate route directions');
+      }
+
       final route = UserRoute(
-        name: name,
+        id: DateTime.now()
+            .millisecondsSinceEpoch
+            .toString(), // Generate a temporary ID
+        title: name,
+        startPoint: '${origin.latitude},${origin.longitude}',
+        endPoint: '${destination.latitude},${destination.longitude}',
         stops: stops,
-        totalDistance: directions.totalDistance,
-        totalDuration: directions.totalDuration,
-        polylinePoints: directions.polylinePoints,
-        departureTime: departureTime,
+        distance: directions.totalDistance,
+        duration: directions.totalDuration,
+        createdAt: DateTime.now(),
+        lastUsed: DateTime.now(),
+        useCount: 0,
+        notes: '',
       );
 
       // Save to database
-      await _databaseService.saveRoute(route);
+      await _databaseService
+          .saveUserRoute(route); // Changed from saveRoute to saveUserRoute
       await loadRoutes();
 
       _currentRoute = route;
@@ -100,7 +128,8 @@ class RouteService extends ChangeNotifier {
 
   Future<void> updateRoute(UserRoute route) async {
     try {
-      await _databaseService.updateRoute(route);
+      await _databaseService.updateUserRoute(
+          route); // Changed from updateRoute to updateUserRoute
       await loadRoutes();
 
       if (_currentRoute?.id == route.id) {
@@ -117,7 +146,8 @@ class RouteService extends ChangeNotifier {
 
   Future<void> deleteRoute(String routeId) async {
     try {
-      await _databaseService.deleteRoute(routeId);
+      await _databaseService.deleteUserRoute(
+          routeId); // Changed from deleteRoute to deleteUserRoute
       await loadRoutes();
 
       if (_currentRoute?.id == routeId) {
@@ -140,8 +170,11 @@ class RouteService extends ChangeNotifier {
   Future<Trip> startTrip(UserRoute route) async {
     try {
       final trip = Trip(
+        id: DateTime.now().millisecondsSinceEpoch.toString(), // Generate ID
         routeId: route.id,
+        title: 'Trip on ${route.title}',
         startTime: DateTime.now(),
+        lastUpdated: DateTime.now(),
         status: TripStatus.active,
       );
 
@@ -165,8 +198,10 @@ class RouteService extends ChangeNotifier {
       final updatedTrip = Trip(
         id: _activeTrip!.id,
         routeId: _activeTrip!.routeId,
+        title: _activeTrip!.title,
         startTime: _activeTrip!.startTime,
         endTime: DateTime.now(),
+        lastUpdated: DateTime.now(),
         status: TripStatus.completed,
       );
 
@@ -201,26 +236,68 @@ class RouteService extends ChangeNotifier {
     UserPreferences preferences,
   ) async {
     final stops = List<Stop>.from(route.stops);
+    final List<FoodPreference> foodPreferences = [];
+
+    // Convert MealPreferences to List<FoodPreference>
+    if (preferences.mealPreferences != null) {
+      if (preferences.mealPreferences!.avoidFastFood == true) {
+        foodPreferences.add(
+            FoodPreference.fastService); // Add the opposite preference to avoid
+      }
+      if (preferences.mealPreferences!.dietaryRestrictions
+              ?.contains('vegetarian') ==
+          true) {
+        foodPreferences.add(FoodPreference.vegetarian);
+      }
+      if (preferences.mealPreferences!.dietaryRestrictions?.contains('vegan') ==
+          true) {
+        foodPreferences.add(FoodPreference.vegan);
+      }
+      if (preferences.mealPreferences!.dietaryRestrictions
+              ?.contains('gluten-free') ==
+          true) {
+        foodPreferences.add(FoodPreference.glutenFree);
+      }
+      // Add more mappings based on your MealPreferences properties
+      // For example, if you have a 'halalPreferred' property:
+      // if (preferences.mealPreferences!.halalPreferred == true) {
+      //   foodPreferences.add(FoodPreference.halal);
+      // }
+    }
 
     // Add meal stops
-    if (preferences.mealPreferences != null) {
-      final mealStops = await _foodStopService.suggestMealStops(
+    if (foodPreferences.isNotEmpty && route.departureTime != null) {
+      final mealSuggestions = await _foodStopService.suggestMealStops(
         route: route,
-        preferences: preferences.mealPreferences!,
+        preferences: foodPreferences,
+        departureTime: route.departureTime!,
       );
-      stops.addAll(mealStops);
+
+      // Convert FoodSuggestion to FoodStop if needed
+      stops.addAll(
+          mealSuggestions.map((suggestion) => suggestion as Stop).toList());
     }
 
     // Add fuel stops
     if (preferences.vehicleProfile != null) {
-      final fuelStops = await _fuelPlanningService.calculateFuelStops(
+      // Create a Vehicle from the VehicleProfile
+      final vehicle = Vehicle(
+        id: preferences.vehicleProfile!.id,
+        name: preferences.vehicleProfile!.name,
+        mpg: preferences.vehicleProfile!.mpg,
+        tankSize: preferences.vehicleProfile!.tankSize,
+        fuelType:
+            preferences.vehicleProfile!.fuelType.toString().split('.').last,
+      );
+
+      final fuelStops = await _fuelPlanningService.suggestFuelStops(
         route: route,
-        vehicleProfile: preferences.vehicleProfile!,
+        vehicle: vehicle,
+        currentFuelLevel:
+            0.0, // Default to empty tank since this isn't in VehicleProfile
       );
       stops.addAll(fuelStops);
     }
-
-    // Re-optimize the route with the new stops
     return optimizeRoute(stops);
   }
 

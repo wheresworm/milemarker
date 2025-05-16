@@ -1,8 +1,9 @@
 // lib/core/models/trip.dart
 import 'package:milemarker/core/models/user_route.dart';
 import 'package:milemarker/core/models/route_optimization.dart';
+import 'package:milemarker/core/models/stop.dart';
 
-enum TripStatus { planned, active, paused, completed, cancelled }
+enum TripStatus { planned, planning, active, paused, completed, cancelled }
 
 class Trip {
   final String id;
@@ -42,7 +43,15 @@ class Trip {
   }
 
   // Add these getters for UI compatibility
+  // Add these getters to the Trip class:
+  String get category =>
+      'trip'; // Or implement a more meaningful category system
+  DateTime? get startedAt => startTime;
+  DateTime? get completedAt => endTime;
+  List<Stop>? get stops => route?.stops;
   double? get distance => route?.distance;
+  double? get totalDistance => distance;
+  Duration? get totalDuration => duration;
   Duration? get duration => route?.duration;
   double? get averageSpeed {
     if (route != null &&

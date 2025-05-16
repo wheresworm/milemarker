@@ -73,6 +73,65 @@ class RouteController extends ChangeNotifier {
     }
   }
 
+  // Add this method to your RouteController class in route_controller.dart
+  Future<void> buildRoute({
+    required LatLng origin,
+    required LatLng destination,
+    required String originName,
+    required String destinationName,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Clear existing stops and add new origin and destination
+      _stops = [
+        Stop(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: originName,
+          location: origin,
+          order: 0,
+        ),
+        Stop(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          name: destinationName,
+          location: destination,
+          order: 1,
+        ),
+      ];
+
+      // Get directions between the points
+      final directions = await _directionsService.getDirections(
+        origin: origin,
+        destination: destination,
+        waypoints: null,
+      );
+
+      if (directions != null) {
+        _currentRoute = UserRoute(
+          title: '$originName to $destinationName',
+          startPoint: '${origin.latitude},${origin.longitude}',
+          endPoint: '${destination.latitude},${destination.longitude}',
+          stops: _stops,
+          distance: directions.totalDistance,
+          duration: directions.totalDuration,
+          polylinePoints: directions.polylinePoints,
+        );
+
+        _updatePolylines();
+      } else {
+        _error = "Could not get directions";
+      }
+      _isLoading = false;
+      notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> addStop(Stop stop) async {
     _stops.add(stop);
     notifyListeners();
@@ -117,21 +176,33 @@ class RouteController extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final waypoints = _stops.map((s) => s.location).toList();
+      // First, extract start and end points - DEFINE THESE FIRST!
+      final start = _stops.first.location;
+      final end = _stops.last.location;
+
+      // Then use them in the directions call
       final directions = await _directionsService.getDirections(
-        waypoints: waypoints,
+        origin: start,
+        destination: end,
+        waypoints:
+            _stops.length > 2 ? _stops.sublist(1, _stops.length - 1) : null,
       );
 
-      // Create temporary route for display
-      _currentRoute = UserRoute(
-        name: 'Current Route',
-        stops: _stops,
-        totalDistance: directions.totalDistance,
-        totalDuration: directions.totalDuration,
-        polylinePoints: directions.polylinePoints,
-      );
+      if (directions != null) {
+        _currentRoute = UserRoute(
+          title: 'Current Route',
+          startPoint: '${start.latitude},${start.longitude}',
+          endPoint: '${end.latitude},${end.longitude}',
+          stops: _stops,
+          distance: directions.totalDistance,
+          duration: directions.totalDuration,
+          polylinePoints: directions.polylinePoints,
+        );
 
-      _updatePolylines();
+        _updatePolylines();
+      } else {
+        _error = "Could not get directions";
+      }
       _isLoading = false;
       notifyListeners();
     } catch (e) {

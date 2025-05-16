@@ -5,12 +5,41 @@ import '../models/stop.dart';
 import '../utils/polyline_utils.dart';
 
 class DirectionsService {
-  static const String _baseUrl =
-      'https://maps.googleapis.com/maps/api/directions/json';
-
   final String apiKey;
 
   DirectionsService({required this.apiKey});
+
+  Future<Map<String, dynamic>?> optimizeWaypoints({
+    required LatLng origin,
+    required LatLng destination,
+    List<Stop>? waypoints,
+  }) async {
+    // First, get directions with the current waypoint order
+    final directions = await getDirections(
+      origin: origin,
+      destination: destination,
+      waypoints: waypoints,
+    );
+
+    if (directions == null) {
+      return null;
+    }
+
+    // In a real app, you would use the Google Directions API with
+    // 'optimize:true' parameter or implement a TSP solver.
+    // For this example, we'll just return the current order
+
+    List<int> optimizedOrder = [];
+    if (waypoints != null) {
+      // Just keep the current order for now
+      optimizedOrder = List.generate(waypoints.length, (i) => i);
+    }
+
+    return {
+      'optimizedOrder': optimizedOrder,
+      'directions': directions,
+    };
+  }
 
   Future<DirectionsResult?> getDirections({
     required LatLng origin,
@@ -88,18 +117,4 @@ class DirectionsService {
   }
 
   // Generate intermediate points for smoother polylines
-  List<LatLng> _generateIntermediatePoints(
-      LatLng start, LatLng end, int numPoints) {
-    final points = <LatLng>[];
-
-    for (int i = 0; i <= numPoints; i++) {
-      final fraction = i / numPoints;
-      final lat = start.latitude + (end.latitude - start.latitude) * fraction;
-      final lng =
-          start.longitude + (end.longitude - start.longitude) * fraction;
-      points.add(LatLng(lat, lng));
-    }
-
-    return points;
-  }
 }

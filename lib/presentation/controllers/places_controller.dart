@@ -10,6 +10,9 @@ class PlacesController extends ChangeNotifier {
   List<Place> _places = [];
   List<Place> get places => _places;
 
+  // Add this getter to resolve the undefined_getter errors
+  List<Place> get searchResults => _places;
+
   bool _isLoading = false;
   bool get isLoading => _isLoading;
 

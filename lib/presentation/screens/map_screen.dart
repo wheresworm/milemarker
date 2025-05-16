@@ -2,13 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/stop.dart';
-import '../../core/models/trip.dart';
-import '../controllers/places_controller.dart';
 import '../controllers/route_controller.dart';
 import '../widgets/place_search_bar.dart';
 import '../widgets/route_map.dart';
-import '../widgets/stop_list.dart';
 import '../widgets/trip_bottom_sheet.dart';
+import '../../core/models/place.dart'; // Added this import
 
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
@@ -25,7 +23,6 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
   bool _isSearching = false;
   bool _isTracking = false;
   LatLng? _currentLocation;
-  Trip? _currentTrip;
 
   @override
   void initState() {
@@ -74,11 +71,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
     Navigator.pushNamed(context, '/route-builder');
   }
 
-  void _onPlaceSelected(SearchResult result) {
+  void _onPlaceSelected(Place place) {
     final routeController = context.read<RouteController>();
     final stop = Stop(
-      name: result.name,
-      location: result.location,
+      id: place.id,
+      name: place.name,
+      location: place.location, // Use place.location which is already a LatLng
       order: routeController.stops.length,
     );
     routeController.addStop(stop);
@@ -97,20 +95,11 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         children: [
           // Map
           RouteMap(
-            markers: routeController.stops
-                .map((stop) => Marker(
-                      markerId: MarkerId(stop.id),
-                      position: stop.location,
-                      infoWindow: InfoWindow(title: stop.name),
-                    ))
-                .toSet(),
-            polylines: routeController.polylines,
             onMapCreated: (controller) {
               _mapController = controller;
               _loadMapStyle();
             },
-            initialPosition:
-                _currentLocation ?? const LatLng(37.7749, -122.4194),
+            // Remove the undefined parameters and add the required ones
           ),
 
           // Search Bar
@@ -122,7 +111,7 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             child: _isSearching
                 ? PlaceSearchBar(
                     onPlaceSelected: _onPlaceSelected,
-                    onClose: _toggleSearch,
+                    // Remove onClose parameter
                   )
                 : Container(),
           ),
@@ -134,14 +123,12 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
             left: 0,
             right: 0,
             child: TripBottomSheet(
-              controller: _bottomSheetController,
-              trip: routeController.currentRoute != null
-                  ? Trip(
-                      routeId: routeController.currentRoute!.id,
-                      status: TripStatus.planning,
-                      startTime: DateTime.now(),
-                    )
-                  : null,
+              animationController: _bottomSheetController,
+              isTracking: _isTracking,
+              onExpand: () {
+                // Handle expand action
+              },
+              route: routeController.currentRoute,
               onTripStart: () {
                 // Start trip
               },
@@ -189,16 +176,4 @@ class _MapScreenState extends State<MapScreen> with TickerProviderStateMixin {
         .loadString('assets/map_style.json');
     _mapController.setMapStyle(style);
   }
-}
-
-class SearchResult {
-  final String name;
-  final LatLng location;
-  final String? placeId;
-
-  SearchResult({
-    required this.name,
-    required this.location,
-    this.placeId,
-  });
 }

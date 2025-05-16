@@ -30,10 +30,7 @@ class _SplashScreenState extends State<SplashScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.primary,
       body: Center(
-        child: AnimatedLogo(
-          size: 200,
-          color: Colors.white,
-        ),
+        child: const AnimatedLogo(),
       ),
     );
   }

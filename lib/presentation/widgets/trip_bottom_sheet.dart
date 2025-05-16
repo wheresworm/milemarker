@@ -158,7 +158,9 @@ class _TripBottomSheetState extends State<TripBottomSheet> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Trip started ${_formatDateTime(widget.currentTrip!.startTime)}',
+            widget.currentTrip!.startTime != null
+                ? 'Trip started ${_formatDateTime(widget.currentTrip!.startTime!)}'
+                : 'Trip started',
             style: theme.textTheme.bodySmall,
           ),
         ],

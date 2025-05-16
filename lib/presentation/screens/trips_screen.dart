@@ -39,13 +39,25 @@ class _TripsScreenState extends State<TripsScreen>
       // Sort trips
       switch (_sortBy) {
         case 'distance':
-          trips.sort((a, b) => b.distance.compareTo(a.distance));
+          trips.sort((a, b) {
+            if (b.distance == null) return a.distance == null ? 0 : -1;
+            if (a.distance == null) return 1;
+            return b.distance!.compareTo(a.distance!);
+          });
           break;
         case 'duration':
-          trips.sort((a, b) => b.duration.compareTo(a.duration));
+          trips.sort((a, b) {
+            if (b.duration == null) return a.duration == null ? 0 : -1;
+            if (a.duration == null) return 1;
+            return b.duration!.compareTo(a.duration!);
+          });
           break;
         default:
-          trips.sort((a, b) => b.startTime.compareTo(a.startTime));
+          trips.sort((a, b) {
+            if (b.startTime == null) return a.startTime == null ? 0 : -1;
+            if (a.startTime == null) return 1;
+            return b.startTime!.compareTo(a.startTime!);
+          });
       }
 
       setState(() {
@@ -86,7 +98,8 @@ class _TripsScreenState extends State<TripsScreen>
     );
 
     if (confirmed == true) {
-      await _databaseService.deleteTrip(trip.id!);
+      // Removed unnecessary non-null assertion
+      await _databaseService.deleteTrip(trip.id);
       _loadTrips();
     }
   }
@@ -107,7 +120,7 @@ class _TripsScreenState extends State<TripsScreen>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // Removed unused theme variable
 
     return Scaffold(
       appBar: AppBar(

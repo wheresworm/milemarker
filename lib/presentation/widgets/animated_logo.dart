@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:math' as math;
 
 class AnimatedLogo extends StatefulWidget {
@@ -84,13 +83,15 @@ class _AnimatedLogoState extends State<AnimatedLogo>
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: theme.colorScheme.primary.withOpacity(0.3),
+                      color: theme.colorScheme.primary
+                          .withAlpha(77), // Fixed: 0.3 × 255 = 77
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
                   ],
                 ),
-                child: Icon(Icons.location_on, color: Colors.white, size: 60),
+                child: const Icon(Icons.location_on,
+                    color: Colors.white, size: 60), // Added const
               ),
             ),
           ),
@@ -111,6 +112,7 @@ class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
   late AnimationController _textController;
   late Animation<double> _textFadeAnimation;
+  bool _shouldNavigate = false;
 
   @override
   void initState() {
@@ -128,7 +130,9 @@ class _SplashScreenState extends State<SplashScreen>
 
     // Start text animation after a delay
     Future.delayed(const Duration(milliseconds: 500), () {
-      _textController.forward();
+      if (mounted) {
+        _textController.forward();
+      }
     });
   }
 
@@ -136,6 +140,20 @@ class _SplashScreenState extends State<SplashScreen>
   void dispose() {
     _textController.dispose();
     super.dispose();
+  }
+
+  // Handle logo animation completion
+  void _handleLogoAnimationComplete() {
+    // Store the navigation intent instead of navigating directly in the callback
+    _shouldNavigate = true;
+
+    // Schedule navigation after a delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      // Only navigate if the widget is still mounted and we should navigate
+      if (mounted && _shouldNavigate) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    });
   }
 
   @override
@@ -149,14 +167,7 @@ class _SplashScreenState extends State<SplashScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             AnimatedLogo(
-              onComplete: () {
-                // Navigate to main screen after animation
-                Future.delayed(const Duration(milliseconds: 500), () {
-                  if (mounted) {
-                    Navigator.of(context).pushReplacementNamed('/home');
-                  }
-                });
-              },
+              onComplete: _handleLogoAnimationComplete,
             ),
             const SizedBox(height: 40),
             FadeTransition(

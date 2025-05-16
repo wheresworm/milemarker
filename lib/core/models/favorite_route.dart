@@ -1,61 +1,58 @@
+// lib/core/models/favorite_route.dart
+
+import 'package:milemarker/core/models/user_route.dart';
+
 class FavoriteRoute {
   final String id;
-  final String routeId;
   final String name;
+  final UserRoute routeData;
   final String? notes;
-  final DateTime savedAt;
-  final int usageCount;
   final DateTime? lastUsed;
+  final int useCount;
 
   FavoriteRoute({
     String? id,
-    required this.routeId,
     required this.name,
+    required this.routeData,
     this.notes,
-    DateTime? savedAt,
-    this.usageCount = 0,
+    this.useCount = 0,
     this.lastUsed,
-  })  : id = id ?? DateTime.now().millisecondsSinceEpoch.toString(),
-        savedAt = savedAt ?? DateTime.now();
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
   FavoriteRoute copyWith({
     String? id,
-    String? routeId,
     String? name,
+    UserRoute? routeData,
     String? notes,
-    DateTime? savedAt,
-    int? usageCount,
+    int? useCount,
     DateTime? lastUsed,
   }) {
     return FavoriteRoute(
       id: id ?? this.id,
-      routeId: routeId ?? this.routeId,
       name: name ?? this.name,
+      routeData: routeData ?? this.routeData,
       notes: notes ?? this.notes,
-      savedAt: savedAt ?? this.savedAt,
-      usageCount: usageCount ?? this.usageCount,
+      useCount: useCount ?? this.useCount,
       lastUsed: lastUsed ?? this.lastUsed,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'routeId': routeId,
         'name': name,
+        'routeData': routeData.toJson(),
         'notes': notes,
-        'savedAt': savedAt.toIso8601String(),
-        'usageCount': usageCount,
+        'useCount': useCount,
         'lastUsed': lastUsed?.toIso8601String(),
       };
 
   factory FavoriteRoute.fromJson(Map<String, dynamic> json) {
     return FavoriteRoute(
       id: json['id'],
-      routeId: json['routeId'],
       name: json['name'],
+      routeData: UserRoute.fromJson(json['routeData']),
       notes: json['notes'],
-      savedAt: DateTime.parse(json['savedAt']),
-      usageCount: json['usageCount'] ?? 0,
+      useCount: json['useCount'] ?? 0,
       lastUsed:
           json['lastUsed'] != null ? DateTime.parse(json['lastUsed']) : null,
     );

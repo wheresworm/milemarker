@@ -146,7 +146,7 @@ class _PlaceSearchBarState extends State<PlaceSearchBar>
                             overflow: TextOverflow.ellipsis,
                           ),
                           subtitle: Text(
-                            place.address,
+                            place.address ?? 'No address',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(

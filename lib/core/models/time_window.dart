@@ -1,30 +1,28 @@
+// lib/core/models/time_window.dart
 class TimeWindow {
-  final DateTime? earliest;
-  final TimeRange? preferred;
-  final DateTime? latest;
+  final DateTime earliest;
+  final DateTime latest;
+  final DateTime preferred;
 
   TimeWindow({
-    this.earliest,
-    this.preferred,
-    this.latest,
+    required this.earliest,
+    required this.latest,
+    required this.preferred,
   });
 
-  Map<String, dynamic> toJson() => {
-        'earliest': earliest?.toIso8601String(),
-        'preferred': preferred?.toJson(),
-        'latest': latest?.toIso8601String(),
-      };
-
-  Map<String, dynamic> toMap() => toJson(); // Alias for database compatibility
+  Map<String, dynamic> toJson() {
+    return {
+      'earliest': earliest.toIso8601String(),
+      'latest': latest.toIso8601String(),
+      'preferred': preferred.toIso8601String(),
+    };
+  }
 
   factory TimeWindow.fromJson(Map<String, dynamic> json) {
     return TimeWindow(
-      earliest:
-          json['earliest'] != null ? DateTime.parse(json['earliest']) : null,
-      preferred: json['preferred'] != null
-          ? TimeRange.fromJson(json['preferred'])
-          : null,
-      latest: json['latest'] != null ? DateTime.parse(json['latest']) : null,
+      earliest: DateTime.parse(json['earliest']),
+      latest: DateTime.parse(json['latest']),
+      preferred: DateTime.parse(json['preferred']),
     );
   }
 }
